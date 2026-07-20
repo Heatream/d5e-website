@@ -16,6 +16,13 @@ export type TypeElement = {
   effect: string;
 };
 
+export type PersonalitySkill = {
+  id: string;
+  name: string;
+  personalities: string[];
+  description: string;
+};
+
 type SkillRow = {
   id: string;
   name: string | null;
@@ -32,6 +39,13 @@ type TypeRow = {
   id: string;
   name: string | null;
   effect: string | null;
+};
+
+type PersonalityRow = {
+  id: string;
+  name: string | null;
+  personality: string | null;
+  description: string | null;
 };
 
 function configuration() {
@@ -111,6 +125,25 @@ export async function getTypeElements(): Promise<TypeElement[]> {
       id: row.id,
       name: text(row.name),
       effect: text(row.effect),
+    }));
+}
+
+export async function getPersonalitySkills(): Promise<PersonalitySkill[]> {
+  const rows = await request<PersonalityRow[]>(
+    "Personality Skills",
+    "select=*&order=name.asc",
+  );
+
+  return rows
+    .filter((row) => row.name && row.personality)
+    .map((row) => ({
+      id: row.id,
+      name: text(row.name, "Unnamed skill"),
+      personalities: text(row.personality, "Uncategorized")
+        .split(",")
+        .map((personality) => personality.trim())
+        .filter(Boolean),
+      description: text(row.description, "No description available."),
     }));
 }
 

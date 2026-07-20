@@ -98,27 +98,13 @@ export function TypeSelector({
             This move was assigned the <strong>{selected.name}</strong> type by its character sheet.
           </div>
         ) : (
-          <>
-            <p className="type-help">Choose an element to preview its name and combat effect.</p>
-            <div className="type-grid" role="group" aria-label="Choose an elemental type">
-              {types.map((type) => {
-                const active = type.id === selectedId;
-                return (
-                  <button
-                    type="button"
-                    key={type.id}
-                    aria-pressed={active}
-                    onClick={() => setSelectedId(active ? null : type.id)}
-                    className={active ? "type-button selected" : "type-button"}
-                    style={{ "--type-color": colors[type.name.toLowerCase()] ?? "#68727b" } as React.CSSProperties}
-                  >
-                    <span className="type-dot" aria-hidden="true" />
-                    {type.name}
-                  </button>
-                );
-              })}
-            </div>
-          </>
+          <label className="detail-type-select">
+            <span>Choose an element to preview its name and combat effect.</span>
+            <select value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value || null)}>
+              <option value="">No type selected</option>
+              {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+            </select>
+          </label>
         )}
       </section>
     </>

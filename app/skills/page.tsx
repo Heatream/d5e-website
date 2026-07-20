@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { SkillsDirectory } from "../components/SkillsDirectory";
-import { getSkills } from "../lib/supabase";
+import { getPersonalitySkills, getSkills, getTypeElements } from "../lib/supabase";
 
 export const metadata: Metadata = {
   title: "Skills",
@@ -8,7 +8,11 @@ export const metadata: Metadata = {
 };
 
 export default async function SkillsPage() {
-  const skills = await getSkills();
+  const [skills, personalitySkills, types] = await Promise.all([
+    getSkills(),
+    getPersonalitySkills(),
+    getTypeElements(),
+  ]);
 
   return (
     <main>
@@ -26,7 +30,7 @@ export default async function SkillsPage() {
       </section>
       <div className="page-shell directory-shell">
         {skills.length ? (
-          <SkillsDirectory skills={skills} />
+          <SkillsDirectory attachmentSkills={skills} personalitySkills={personalitySkills} types={types} />
         ) : (
           <div className="empty-state permanent">
             <h2>No skills available</h2>

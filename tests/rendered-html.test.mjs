@@ -32,7 +32,11 @@ test("renders the complete attachment skill directory", async () => {
   assert.match(html, /Attachment Skills/);
   assert.match(html, /Heavy Strike/);
   assert.match(html, /Texture Blow/);
-  assert.match(html, /href="\/skills\/heavy-strike"/);
+  assert.match(html, /Personality Skills/);
+  assert.match(html, /Great Embrace/);
+  assert.match(html, /Adoring/);
+  assert.match(html, /skill-accordion/);
+  assert.match(html, /No type selected/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 

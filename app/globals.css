@@ -169,6 +169,30 @@ button { cursor: pointer; }
   background: var(--surface);
   box-shadow: var(--shadow);
 }
+.skill-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 7px;
+  gap: 7px;
+  background: #e9eeec;
+  border-bottom: 1px solid var(--line);
+}
+.skill-tabs button {
+  min-height: 55px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #65747d;
+  background: transparent;
+  font-weight: 780;
+  transition: color .16s, background .16s, box-shadow .16s;
+}
+.skill-tabs button b { min-width: 25px; padding: 3px 6px; border-radius: 999px; background: rgba(16,36,51,.08); font-family: var(--font-geist-mono); font-size: 10px; }
+.skill-tabs button.selected { color: var(--navy); background: var(--surface); border-color: rgba(16,36,51,.1); box-shadow: 0 4px 12px rgba(16,36,51,.07); }
+.skill-tabs button.selected b { color: white; background: var(--blue); }
 .directory-tools {
   min-height: 88px;
   padding: 19px 22px;
@@ -222,6 +246,52 @@ button { cursor: pointer; }
 .skill-name-link:hover span { transform: translateX(3px); }
 .damage-chip { display: inline-flex; padding: 4px 8px; border-radius: 5px; color: #a52f2b; background: #fce8e4; font-family: var(--font-geist-mono); font-weight: 750; }
 .muted { color: #9aa4a9; }
+
+.accordion-list { background: #eef1ee; }
+.skill-accordion { border-bottom: 1px solid var(--line); background: var(--surface); }
+.skill-accordion:last-child { border-bottom: 0; }
+.skill-accordion summary {
+  min-height: 65px;
+  display: grid;
+  grid-template-columns: 24px minmax(180px, 1fr) minmax(190px, .8fr) 82px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  cursor: pointer;
+  list-style: none;
+  transition: background .16s;
+}
+.skill-accordion summary::-webkit-details-marker { display: none; }
+.skill-accordion summary:hover { background: #f7faf8; }
+.skill-accordion[open] > summary { background: #f4f8f7; border-bottom: 1px solid var(--line); }
+.accordion-chevron { width: 24px; height: 24px; display: grid; place-items: center; color: var(--blue); font-size: 23px; transition: transform .18s; }
+.skill-accordion[open] .accordion-chevron { transform: rotate(90deg); }
+.accordion-name { color: var(--navy); font-size: 15px; font-weight: 800; }
+.accordion-meta { display: flex; align-items: center; gap: 16px; color: #697881; font-size: 12px; }
+.accordion-meta b { min-width: 70px; color: #455661; font-size: 11px; text-transform: uppercase; }
+.skill-accordion summary > .damage-chip, .skill-accordion summary > .muted { justify-self: end; }
+.accordion-content { padding: 22px 22px 24px 58px; background: #fffefa; }
+.attachment-content { display: grid; grid-template-columns: 230px minmax(250px, 1fr) 205px; gap: 28px; align-items: start; }
+.compact-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.compact-stats span { display: flex; flex-direction: column; gap: 4px; color: #40535f; font-size: 12px; line-height: 1.35; }
+.compact-stats b { color: #8a979c; font-family: var(--font-geist-mono); font-size: 8px; letter-spacing: .09em; text-transform: uppercase; }
+.inline-description > p, .personality-content p { margin: 0; color: #435563; font-size: 14px; line-height: 1.65; }
+.inline-type-effect { margin-top: 15px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; border-left: 4px solid var(--type-color); border-radius: 0 7px 7px 0; background: #f1f4f1; }
+.inline-type-effect strong { color: var(--navy); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
+.inline-type-effect span { color: #50616b; font-size: 12px; line-height: 1.5; }
+.compact-type-select, .detail-type-select { display: flex; flex-direction: column; gap: 7px; color: #74838a; font-family: var(--font-geist-mono); font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.compact-type-select select, .detail-type-select select { width: 100%; min-height: 42px; padding: 0 34px 0 12px; border: 1px solid #ccd5d4; border-radius: 7px; color: var(--navy); background: white; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; text-transform: none; letter-spacing: 0; outline: none; }
+.compact-type-select select:focus, .detail-type-select select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(19,125,159,.12); }
+.personality-group { padding: 22px 18px 8px; }
+.personality-heading { min-height: 34px; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; padding: 0 7px 9px; }
+.personality-heading h3 { margin: 0; color: var(--navy); font-size: 17px; letter-spacing: -.02em; }
+.personality-heading span { color: #87949a; font-family: var(--font-geist-mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.personality-group .skill-accordion { border: 1px solid var(--line); border-bottom: 0; }
+.personality-group .skill-accordion:first-of-type { border-radius: 9px 9px 0 0; }
+.personality-group .skill-accordion:last-child { border-bottom: 1px solid var(--line); border-radius: 0 0 9px 9px; }
+.personality-accordion summary { grid-template-columns: 24px 1fr auto; min-height: 57px; }
+.personality-count { color: #819097; font-size: 10px; }
+.personality-content { padding-top: 17px; padding-bottom: 19px; }
 
 .empty-state { padding: 80px 24px; text-align: center; }
 .empty-state > span { display: block; color: var(--blue); font-size: 44px; }
@@ -297,6 +367,8 @@ button { cursor: pointer; }
 .type-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--type-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--type-color) 14%, transparent); }
 .type-button.selected .type-dot { background: white; box-shadow: 0 0 0 3px rgba(255,255,255,.2); }
 .assigned-type-note { margin-top: 18px; padding: 16px 18px; border-left: 4px solid var(--blue); background: #edf5f6; color: #455965; line-height: 1.5; }
+.detail-type-select { max-width: 370px; margin-top: 17px; }
+.detail-type-select > span { color: var(--muted); font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; }
 
 .stat-grid { margin: 0; padding-top: 36px; display: grid; grid-template-columns: repeat(5, 1fr); }
 .stat-grid div { min-height: 76px; padding: 4px 20px; border-right: 1px solid var(--line); }
@@ -337,6 +409,8 @@ button { cursor: pointer; }
   .stat-grid { grid-template-columns: repeat(3, 1fr); gap: 22px 0; }
   .stat-grid div:nth-child(3) { border-right: 0; }
   .nav-shell { gap: 24px; }
+  .attachment-content { grid-template-columns: 190px 1fr; }
+  .compact-type-select { grid-column: 1 / -1; max-width: 240px; }
 }
 
 @media (max-width: 720px) {
@@ -351,6 +425,7 @@ button { cursor: pointer; }
   .hero-content { padding-block: 46px 58px; }
   .page-hero p:last-child { font-size: 15px; line-height: 1.55; }
   .directory-tools { align-items: stretch; flex-direction: column; gap: 11px; padding: 15px; }
+  .skill-tabs button { min-height: 49px; font-size: 12px; }
   .result-count { padding-left: 4px; }
   .skill-table thead { display: none; }
   .skill-table, .skill-table tbody, .skill-table tr, .skill-table td { display: block; width: 100%; }
@@ -361,6 +436,15 @@ button { cursor: pointer; }
   .skill-table td:first-child { display: block; padding-bottom: 13px; }
   .skill-table td:first-child::before { display: none; }
   .skill-name-link { font-size: 17px; }
+  .skill-accordion summary { grid-template-columns: 24px 1fr auto; min-height: 62px; padding: 9px 14px; gap: 8px; }
+  .accordion-meta { display: none; }
+  .skill-accordion summary > .damage-chip, .skill-accordion summary > .muted { font-size: 10px; }
+  .accordion-content { padding: 19px 16px 21px 46px; }
+  .attachment-content { grid-template-columns: 1fr; gap: 20px; }
+  .compact-type-select { grid-column: auto; max-width: none; }
+  .personality-group { padding: 18px 10px 5px; }
+  .personality-accordion summary { grid-template-columns: 24px 1fr; }
+  .personality-count { display: none; }
   .detail-page { padding-top: 35px; }
   .skill-sheet { padding: 27px 20px; }
   .detail-title-row { flex-direction: column; gap: 17px; padding-bottom: 28px; }
