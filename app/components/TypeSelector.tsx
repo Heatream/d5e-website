@@ -16,10 +16,14 @@ const colors: Record<string, string> = {
   water: "#3d78b6",
   wind: "#4b947c",
 };
+const labels: Record<string, string> = { darkness: "Dk", earth: "Ea", fire: "Fi", ice: "Ic", light: "Lt", lightning: "Li", null: "Nu", plant: "Pl", steel: "St", water: "Wa", wind: "Wi" };
 
-function validNavigationType(types: TypeElement[]) {
+function validNavigationType(types: TypeElement[], skillName: string) {
   if (typeof window === "undefined") return null;
-  const candidate = window.history.state?.d5eSkillType;
+  const slug = skillName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const stored = sessionStorage.getItem(`d5eSkillType:${slug}`);
+  if (stored) sessionStorage.removeItem(`d5eSkillType:${slug}`);
+  const candidate = stored ?? window.history.state?.d5eSkillType;
   if (typeof candidate !== "string") return null;
   return types.find((type) => type.name.toLowerCase() === candidate.toLowerCase()) ?? null;
 }
@@ -37,12 +41,12 @@ export function TypeSelector({
   const [assigned, setAssigned] = useState(false);
 
   useEffect(() => {
-    const navigationType = validNavigationType(types);
+    const navigationType = validNavigationType(types, skillName);
     if (navigationType) {
       setSelectedId(navigationType.id);
       setAssigned(true);
     }
-  }, [types]);
+  }, [types, skillName]);
 
   const selected = useMemo(
     () => types.find((type) => type.id === selectedId) ?? null,
@@ -98,13 +102,12 @@ export function TypeSelector({
             This move was assigned the <strong>{selected.name}</strong> type by its character sheet.
           </div>
         ) : (
-          <label className="detail-type-select">
+          <div className="detail-type-buttons">
             <span>Choose an element to preview its name and combat effect.</span>
-            <select value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value || null)}>
-              <option value="">No type selected</option>
-              {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
-            </select>
-          </label>
+            <div className="mini-type-row" role="group" aria-label="Choose elemental type">
+              {types.map((type) => <button key={type.id} type="button" title={type.name} aria-label={type.name} aria-pressed={selectedId === type.id} className={selectedId === type.id ? "selected" : ""} style={{ "--type-color": colors[type.name.toLowerCase()] ?? "#68727b" } as React.CSSProperties} onClick={() => setSelectedId(selectedId === type.id ? null : type.id)}>{labels[type.name.toLowerCase()] ?? type.name.slice(0, 2)}</button>)}
+            </div>
+          </div>
         )}
       </section>
     </>

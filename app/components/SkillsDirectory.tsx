@@ -11,6 +11,10 @@ const typeColors: Record<string, string> = {
   null: "#68727b", plant: "#4d8b55", steel: "#637783",
   water: "#3d78b6", wind: "#4b947c",
 };
+const typeLabels: Record<string, string> = {
+  darkness: "Dk", earth: "Ea", fire: "Fi", ice: "Ic", light: "Lt", lightning: "Li",
+  null: "Nu", plant: "Pl", steel: "St", water: "Wa", wind: "Wi",
+};
 
 function isDamaging(damage: string) {
   const value = damage.trim().toLowerCase();
@@ -46,15 +50,12 @@ function AttachmentRow({ skill, types }: { skill: AttachmentSkill; types: TypeEl
             </div>
           )}
         </div>
-        {damaging && (
-          <label className="compact-type-select">
-            <span>Elemental type</span>
-            <select value={selectedType} onChange={(event) => setSelectedType(event.target.value)}>
-              <option value="">No type selected</option>
-              {types.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-        )}
+        {damaging && <div className="compact-type-picker">
+          <span>Elemental type</span>
+          <div className="mini-type-row" role="group" aria-label="Choose elemental type">
+            {types.map((item) => <button key={item.id} type="button" title={item.name} aria-label={item.name} aria-pressed={selectedType === item.id} className={selectedType === item.id ? "selected" : ""} style={{ "--type-color": typeColors[item.name.toLowerCase()] ?? "#68727b" } as React.CSSProperties} onClick={() => setSelectedType(selectedType === item.id ? "" : item.id)}>{typeLabels[item.name.toLowerCase()] ?? item.name.slice(0, 2)}</button>)}
+          </div>
+        </div>}
       </div>
     </details>
   );
