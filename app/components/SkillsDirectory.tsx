@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { AttachmentSkill, PersonalitySkill, TypeElement } from "../lib/supabase";
+import { formatPower, type AttachmentSkill, type PersonalitySkill, type TypeElement } from "../lib/supabase";
 
 type Tab = "attachment" | "personality";
 
@@ -31,14 +31,14 @@ function AttachmentRow({ skill, types }: { skill: AttachmentSkill; types: TypeEl
       <summary>
         <span className="accordion-chevron" aria-hidden="true">›</span>
         <span className="accordion-name">{type ? `${type.name} ${skill.name}` : skill.name}</span>
-        <span className="accordion-meta"><b>{skill.power}</b><span>{skill.time}</span></span>
+        <span className="accordion-meta"><b>{formatPower(skill.power)}</b><span>{skill.time}</span></span>
         <span className={damaging ? "damage-chip" : "muted"}>{skill.damage}</span>
       </summary>
       <div className="accordion-content attachment-content">
         <div className="compact-stats">
           <span><b>Range</b>{skill.range}</span>
           <span><b>Duration</b>{skill.duration}</span>
-          <span><b>Power</b>{skill.power}</span>
+          <span><b>Power</b>{formatPower(skill.power)}</span>
           <span><b>Damage</b>{skill.damage}</span>
         </div>
         <div className="inline-description">

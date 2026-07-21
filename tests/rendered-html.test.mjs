@@ -67,6 +67,7 @@ test("renders a damaging skill with all elemental choices", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Heavy Strike \| D5e<\/title>/i);
+  assert.match(html, /<dd>STR<\/dd>/);
   assert.match(html, /Choose an element to preview its name and combat effect/);
   for (const type of [
     "Darkness", "Earth", "Fire", "Ice", "Light", "Lightning",

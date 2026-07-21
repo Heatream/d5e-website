@@ -220,3 +220,11 @@ export function isDamagingSkill(skill: AttachmentSkill) {
   const value = skill.damage.trim().toLowerCase();
   return value !== "" && value !== "-" && value !== "—" && value !== "none";
 }
+
+export function formatPower(value: string) {
+  const abbreviations: Record<string, string> = {
+    strength: "STR", dexterity: "DEX", constitution: "CON",
+    intelligence: "INT", wisdom: "WIS", charisma: "CHA",
+  };
+  return value.replace(/\b(strength|dexterity|constitution|intelligence|wisdom|charisma)\b/gi, (match) => abbreviations[match.toLowerCase()]);
+}

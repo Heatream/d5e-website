@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AttachmentSkill, Attribute, Digimon, Field, LevelChart, PersonalitySkill, TypeElement } from "../lib/supabase";
+import { formatPower, type AttachmentSkill, type Attribute, type Digimon, type Field, type LevelChart, type PersonalitySkill, type TypeElement } from "../lib/supabase";
 import { calculateHp, calculateMovement, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
@@ -79,13 +79,12 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <div className="print-dl"><strong>{view.levelRow?.digislot ?? 1}</strong></div>
         <div className="print-speed"><strong>{view.movement}<small>ft</small></strong></div>
         {view.attribute?.image && <img className="print-attribute" src={view.attribute.image} alt={`${selected.attribute} attribute`} />}
-        {view.field?.symbol && <img className="print-field" src={view.field.symbol} alt={`${view.field.name} field`} />}
         <div className="print-abilities">{abilityOrder.map((ability) => <div key={ability}><strong>{view.stats[ability]}</strong></div>)}</div>
-        {special && <div className="print-special"><div><strong>{special.name}</strong><span>{special.range}</span><span>{special.power}</span><span>{special.damage}</span></div><p>{validType(special.type, types)?.name ?? special.type} Type</p></div>}
-        <div className="print-attachments">{view.attachmentSkills.length ? view.attachmentSkills.map(({ ref, skill, type }) => <button type="button" key={`${ref.skill}-${ref.level}`} onClick={() => openSkill(ref.skill, ref.type)}><span>{type ? `${type.name} ${skill!.name}` : skill!.name}</span><span>{skill!.range}</span><span>{skill!.power}</span><span>{skill!.damage}</span></button>) : <p>No attachment skills unlocked.</p>}</div>
+        {special && <div className="print-special"><div><strong>{special.name}</strong><span>{special.range}</span><span>{formatPower(special.power)}</span><span>{special.damage}</span></div><p>{validType(special.type, types)?.name ?? special.type} Type</p></div>}
+        <div className="print-attachments">{view.attachmentSkills.length ? view.attachmentSkills.map(({ ref, skill, type }) => <button type="button" key={`${ref.skill}-${ref.level}`} onClick={() => openSkill(ref.skill, ref.type)}><span>{type ? `${type.name} ${skill!.name}` : skill!.name}</span><span>{skill!.range}</span><span>{formatPower(skill!.power)}</span><span>{skill!.damage}</span></button>) : <p>No attachment skills unlocked.</p>}</div>
         <div className="print-proficiencies"><p>{selected.proficiencies.join(" · ") || "—"}</p></div>
-        <div className="print-saves"><p>{selected.savingThrows.join(" · ") || "—"}</p></div>
-        <div className="print-weaknesses"><p>{selected.weakness.join(" · ") || "—"}</p></div>
+        <div className="print-saves"><p>{selected.savingThrows.length ? selected.savingThrows.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
+        <div className="print-weaknesses"><p>{selected.weakness.length ? selected.weakness.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
         <div className="print-personality"><h3>{view.personality || "Personality"}{view.skillName ? ` · ${view.skillName}` : ""}</h3><p>{view.personalitySkill?.description ?? (view.skillName ? "Description unavailable." : "—")}</p></div>
       </article>
     </div>

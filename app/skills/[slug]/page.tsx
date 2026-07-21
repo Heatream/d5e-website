@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TypeSelector } from "../../components/TypeSelector";
-import { getSkill, getTypeElements, isDamagingSkill } from "../../lib/supabase";
+import { formatPower, getSkill, getTypeElements, isDamagingSkill } from "../../lib/supabase";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -46,7 +46,7 @@ export default async function SkillDetailPage({ params }: Props) {
           )}
 
           <dl className="stat-grid" aria-label="Skill statistics">
-            <div><dt>Skill Power</dt><dd>{skill.power}</dd></div>
+            <div><dt>Skill Power</dt><dd>{formatPower(skill.power)}</dd></div>
             <div><dt>Skill Time</dt><dd>{skill.time}</dd></div>
             <div><dt>Damage</dt><dd>{skill.damage}</dd></div>
             <div><dt>Duration</dt><dd>{skill.duration}</dd></div>
