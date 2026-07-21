@@ -2,31 +2,27 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AttachmentSkill, Attribute, Digimon, Field, LevelChart, TypeElement } from "../lib/supabase";
+import type { AttachmentSkill, Attribute, Digimon, Field, LevelChart, PersonalitySkill, TypeElement } from "../lib/supabase";
+import { calculateHp, calculateMovement, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
-const abilityLabels = { strength: "STR", dexterity: "DEX", constitution: "CON", intelligence: "INT", wisdom: "WIS", charisma: "CHA" } as const;
-type Ability = keyof typeof abilityLabels;
-
-function modifier(score: number) { return Math.floor((score - 10) / 2); }
-function maxDie(die: string) {
-  const match = die.toLowerCase().match(/(\d+)d(\d+)/);
-  return match ? Number(match[1]) * Number(match[2]) : 6;
-}
+type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 function validType(value: string, types: TypeElement[]) { return types.find((type) => type.name.toLowerCase() === value.toLowerCase()) ?? null; }
 
-function DigimonPortrait({ src, name }: { src: string | null; name: string }) {
+function DigimonPortrait({ src, name, className }: { src: string | null; name: string; className?: string }) {
   const [failed, setFailed] = useState(false);
-  return <img src={!src || failed ? GENERIC_IMAGE : src} alt={name} onError={() => setFailed(true)} />;
+  return <img className={className} src={!src || failed ? GENERIC_IMAGE : src} alt={name} onError={() => setFailed(true)} />;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types }: {
-  digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[]; skills: AttachmentSkill[]; types: TypeElement[];
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills }: {
+  digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[]; skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
 }) {
   const router = useRouter();
-  const [selectedSlug, setSelectedSlug] = useState(digimon[0]?.slug ?? "");
+  const [selectedSlug, setSelectedSlug] = useState("");
+  const [query, setQuery] = useState("");
   const [level, setLevel] = useState(1);
-  const selected = digimon.find((item) => item.slug === selectedSlug) ?? digimon[0];
+  const selected = digimon.find((item) => item.slug === selectedSlug) ?? null;
+  const filtered = useMemo(() => digimon.filter((item) => `${item.name} ${item.stage} ${item.attribute} ${item.field}`.toLowerCase().includes(query.trim().toLowerCase())), [digimon, query]);
 
   const view = useMemo(() => {
     if (!selected) return null;
@@ -34,71 +30,64 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
     const field = fields.find((item) => item.abbreviation.toLowerCase() === selected.field.toLowerCase());
     const levelRow = levels.find((item) => item.level === level) ?? levels[0];
     const stats = { strength: selected.strength, dexterity: selected.dexterity, constitution: selected.constitution, intelligence: selected.intelligence, wisdom: selected.wisdom, charisma: selected.charisma };
-    attribute?.statBuffs.forEach((buff) => {
-      const key = buff.toLowerCase() as Ability;
-      if (key in stats) stats[key] += 2;
-    });
-    const stage = selected.stage.toLowerCase();
-    const hitDie = attribute?.hpDice[stage] ?? "1d6";
-    const hp = Math.max(1, level * (maxDie(hitDie) + modifier(stats.constitution)));
+    attribute?.statBuffs.forEach((buff) => { const key = buff.toLowerCase() as Ability; if (key in stats) stats[key] += 2; });
+    const stage = normalizeStage(selected.stage);
+    const hitDie = attribute?.hpDice[stage === "7th stage" ? "mega" : stage] ?? "1d6";
     const attachmentSkills = selected.attachmentSkills.filter((ref) => ref.level <= level).map((ref) => ({ ref, skill: skills.find((skill) => skill.slug === ref.skill), type: validType(ref.type, types) })).filter((entry) => entry.skill);
-    return { attribute, field, levelRow, stats, hitDie, hp, attachmentSkills };
-  }, [selected, attributes, fields, levels, level, skills, types]);
+    const [personality = "", skillName = ""] = selected.personalitySkill.split(",").map((part) => part.trim());
+    const personalitySkill = personalitySkills.find((item) => item.name.toLowerCase() === skillName.toLowerCase() && item.personalities.some((value) => value.toLowerCase() === personality.toLowerCase()));
+    return { attribute, field, levelRow, stats, hitDie, hp: calculateHp(hitDie, level, stats.constitution), movement: calculateMovement(stats.dexterity), attachmentSkills, personality, skillName, personalitySkill };
+  }, [selected, attributes, fields, levels, level, skills, types, personalitySkills]);
 
-  if (!selected || !view) return <div className="empty-state"><h2>No Digimon available</h2></div>;
-  const stageLevel = ({ rookie: 1, champion: 2, ultimate: 3, mega: 4 } as Record<string, number>)[selected.stage.toLowerCase()] ?? 1;
+  function selectDigimon(item: Digimon) { const [minimum] = stageRange(item.stage); setLevel(minimum); setSelectedSlug(item.slug); }
+  function openSkill(slug: string, type: string) { const matchingType = validType(type, types); if (matchingType) sessionStorage.setItem(`d5eSkillType:${slug}`, matchingType.name); router.push(`/skills/${slug}`); }
+
+  if (!digimon.length) return <div className="empty-state"><h2>No Digimon available</h2><p>The field guide has no entries yet.</p></div>;
+
+  if (!selected || !view) return <section className="manual-directory" aria-label="Digimon directory">
+    <div className="manual-search-row">
+      <label className="search-box"><span>Search Digimon</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, stage, attribute, or field" /></label>
+      <p aria-live="polite"><strong>{filtered.length}</strong> {filtered.length === 1 ? "Digimon" : "Digimon"}</p>
+    </div>
+    {filtered.length ? <div className="digimon-directory-grid">{filtered.map((item) => {
+      const field = fields.find((entry) => entry.abbreviation.toLowerCase() === item.field.toLowerCase());
+      return <button type="button" className="digimon-directory-card" key={item.id} onClick={() => selectDigimon(item)}>
+        <span className="directory-portrait"><DigimonPortrait src={item.image} name="" /></span>
+        <span className="directory-copy"><strong>{item.name}</strong><small>{item.stage} · {item.attribute}</small></span>
+        {field?.symbol && <img className="directory-field" src={field.symbol} alt={`${field.name} field`} />}
+      </button>;
+    })}</div> : <div className="empty-state"><h2>No matching Digimon</h2><p>Try a different name, stage, attribute, or field.</p></div>}
+  </section>;
+
+  const [minimum, maximum] = stageRange(selected.stage);
   const special = selected.specialSkills[0];
-
-  function openSkill(slug: string, type: string) {
-    const matchingType = validType(type, types);
-    if (matchingType) sessionStorage.setItem(`d5eSkillType:${slug}`, matchingType.name);
-    router.push(`/skills/${slug}`);
-  }
-
-  return <>
-    <section className="manual-controls" aria-label="Monster manual controls">
-      <label className="digimon-select"><span>Digimon</span><select value={selectedSlug} onChange={(event) => setSelectedSlug(event.target.value)}>{digimon.map((item) => <option key={item.id} value={item.slug}>{item.name}</option>)}</select></label>
-      <div className="level-control">
-        <div><span>D-Level</span><strong>{level}</strong></div>
-        <input type="range" min="1" max="20" value={level} onChange={(event) => setLevel(Number(event.target.value))} aria-label="Digimon level" />
-        <div className="level-marks"><span>1</span><span>5</span><span>10</span><span>15</span><span>20</span></div>
-      </div>
-    </section>
+  const abilityOrder: Ability[] = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"];
+  return <section className="selected-digimon">
+    <div className="manual-controls">
+      <button className="back-to-directory" type="button" onClick={() => setSelectedSlug("")}>← Back to Monster Manual</button>
+      <div className="level-control"><div><span>D-Level · {selected.stage}</span><strong>{level}</strong></div><input type="range" min={minimum} max={maximum} value={level} onChange={(event) => setLevel(Number(event.target.value))} aria-label={`${selected.name} level`} /><div className="level-marks"><span>{minimum}</span><span>{maximum}</span></div></div>
+    </div>
 
     <div className="sheet-scroll">
-      <article className="digimon-sheet" style={{ "--field-border": `url("${view.field?.border ?? ""}")` } as React.CSSProperties}>
-        <section className="sheet-identity">
-          <div className="sheet-name-row"><h2>{selected.name}</h2><span>Lv <b>{level}</b></span></div>
-          <div className="portrait-frame"><DigimonPortrait src={selected.image} name={selected.name} /></div>
-        </section>
-
-        <section className="sheet-vitals">
-          <div className="hp-stat"><small>{view.hitDie}</small><span>HP</span><strong>{view.hp}</strong></div>
-          <div className="pill-stat"><b>AC</b><span>{10 + modifier(view.stats.dexterity)}</span></div>
-          <div className="pill-stat"><b>Prof</b><span>{view.levelRow?.proficiency ?? "+2"}</span></div>
-          <div className="big-stat"><span>DL</span><strong>{view.levelRow?.digislot ?? 1}</strong></div>
-          <div className="big-stat"><span>Speed</span><strong>30<small>ft</small></strong></div>
-          <div className="symbol-card"><img src={view.attribute?.image} alt={`${selected.attribute} attribute`} /><span>{selected.attribute}</span></div>
-          <div className="symbol-card"><img src={view.field?.symbol} alt={`${view.field?.name ?? selected.field} field`} /><span>{view.field?.abbreviation ?? selected.field}</span></div>
-        </section>
-
-        <section className="ability-grid">
-          {(Object.keys(abilityLabels) as Ability[]).map((ability) => <div key={ability}><span>{abilityLabels[ability]}</span><strong>{view.stats[ability]}</strong><small>{modifier(view.stats[ability]) >= 0 ? "+" : ""}{modifier(view.stats[ability])}</small></div>)}
-        </section>
-
-        <section className="sheet-actions">
-          {special && <div className="special-skill-panel"><div className="action-head"><strong>{special.name}</strong><span>{special.range}</span><span>{special.power}</span><span>{special.damage}</span></div><p>{validType(special.type, types)?.name ?? special.type} Type</p></div>}
-          <div className="attachment-panel"><div className="attachment-head"><strong>Attachment Skills</strong><span>Range</span><span>Power</span><span>Damage</span></div>
-            {view.attachmentSkills.length ? view.attachmentSkills.map(({ ref, skill, type }) => <button type="button" className="manual-skill-row" key={ref.skill} onClick={() => openSkill(ref.skill, ref.type)}><span>{type ? `${type.name} ${skill!.name}` : skill!.name}</span><span>{skill!.range}</span><span>{skill!.power}</span><span>{skill!.damage}</span></button>) : <p className="locked-message">No attachment skills unlocked at this level.</p>}
-          </div>
-        </section>
-
-        <aside className="sheet-traits">
-          <div className="trait-card proficiency-card"><h3>Proficiency</h3><p>{selected.proficiencies.join(" · ") || "—"}</p></div>
-          <div className="split-traits"><div className="trait-card"><h3>Saving Throws</h3><p>{selected.savingThrows.join(" · ") || "—"}</p></div><div className="trait-card"><h3>Weaknesses</h3><p>{selected.weakness.join(" · ") || "—"}</p></div></div>
-          <div className="trait-card identity-card"><h3>{view.field?.name ?? selected.field}</h3><p>{selected.stage} · Stage {stageLevel}</p></div>
-        </aside>
+      <article className="digimon-sheet" aria-label={`${selected.name} level ${level} stat sheet`}>
+        <DigimonPortrait className="sheet-portrait" src={selected.image} name={selected.name} />
+        {view.field?.border && <img className="sheet-template" src={view.field.border} alt="" aria-hidden="true" />}
+        <h2 className="print-name">{selected.name}</h2><div className="print-level"><strong>{level}</strong></div>
+        <div className="print-hp"><small>{view.hitDie}</small><strong>{view.hp}</strong></div>
+        <div className="print-ac"><span>{10 + modifier(view.stats.dexterity)}</span></div>
+        <div className="print-prof"><span>{view.levelRow?.proficiency ?? "+2"}</span></div>
+        <div className="print-dl"><strong>{view.levelRow?.digislot ?? 1}</strong></div>
+        <div className="print-speed"><strong>{view.movement}<small>ft</small></strong></div>
+        {view.attribute?.image && <img className="print-attribute" src={view.attribute.image} alt={`${selected.attribute} attribute`} />}
+        {view.field?.symbol && <img className="print-field" src={view.field.symbol} alt={`${view.field.name} field`} />}
+        <div className="print-abilities">{abilityOrder.map((ability) => <div key={ability}><strong>{view.stats[ability]}</strong></div>)}</div>
+        {special && <div className="print-special"><div><strong>{special.name}</strong><span>{special.range}</span><span>{special.power}</span><span>{special.damage}</span></div><p>{validType(special.type, types)?.name ?? special.type} Type</p></div>}
+        <div className="print-attachments">{view.attachmentSkills.length ? view.attachmentSkills.map(({ ref, skill, type }) => <button type="button" key={`${ref.skill}-${ref.level}`} onClick={() => openSkill(ref.skill, ref.type)}><span>{type ? `${type.name} ${skill!.name}` : skill!.name}</span><span>{skill!.range}</span><span>{skill!.power}</span><span>{skill!.damage}</span></button>) : <p>No attachment skills unlocked.</p>}</div>
+        <div className="print-proficiencies"><p>{selected.proficiencies.join(" · ") || "—"}</p></div>
+        <div className="print-saves"><p>{selected.savingThrows.join(" · ") || "—"}</p></div>
+        <div className="print-weaknesses"><p>{selected.weakness.join(" · ") || "—"}</p></div>
+        <div className="print-personality"><h3>{view.personality || "Personality"}{view.skillName ? ` · ${view.skillName}` : ""}</h3><p>{view.personalitySkill?.description ?? (view.skillName ? "Description unavailable." : "—")}</p></div>
       </article>
     </div>
-  </>;
+  </section>;
 }

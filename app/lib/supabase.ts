@@ -29,6 +29,7 @@ export type Digimon = {
   id: number; name: string; slug: string; attribute: string; field: string; stage: string; image: string | null;
   strength: number; dexterity: number; constitution: number; intelligence: number; wisdom: number; charisma: number;
   proficiencies: string[]; savingThrows: string[]; weakness: string[]; attachmentSkills: DigimonSkillRef[]; specialSkills: SpecialSkill[];
+  personalitySkill: string;
 };
 export type Field = { id: number; name: string; abbreviation: string; symbol: string; border: string };
 export type Attribute = { id: string; name: string; statBuffs: string[]; hpDice: Record<string, string>; image: string };
@@ -64,6 +65,7 @@ type DigimonRow = {
   strength: string | null; dexterity: string | null; constitution: string | null; intelligence: string | null; wisdom: string | null; charisma: string | null;
   proficiencies: string[] | null; "saving throws": string[] | null; weakness: string[] | null; "attachment skills": DigimonSkillRef[] | null;
   "Special Skill": Array<{ name?: string; type?: string; range?: string; damage?: string; description?: string; "skill power"?: string }> | null;
+  "personality skill": string | null;
 };
 type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null };
 type AttributeRow = { id: string; name: string | null; "+2 stat buff": string | null; "hp dice rookie": string | null; "hp dice champion": string | null; "hp dice ultimate": string | null; "hp dice mega": string | null; image: string | null };
@@ -171,13 +173,14 @@ export async function getPersonalitySkills(): Promise<PersonalitySkill[]> {
 const number = (value: string | null, fallback = 0) => Number.parseInt(value ?? "", 10) || fallback;
 
 export async function getMonsterManualData() {
-  const [digimonRows, fieldRows, attributeRows, levelRows, skills, types] = await Promise.all([
+  const [digimonRows, fieldRows, attributeRows, levelRows, skills, types, personalitySkills] = await Promise.all([
     request<DigimonRow[]>("Digimon", "select=*&order=name.asc"),
     request<FieldRow[]>("Field", "select=*&order=name.asc"),
     request<AttributeRow[]>("Attributes", "select=*&order=name.asc"),
     request<LevelRow[]>("D Level Chart", "select=*&order=level.asc"),
     getSkills(),
     getTypeElements(),
+    getPersonalitySkills(),
   ]);
 
   const digimon: Digimon[] = digimonRows.filter((row) => row.name && row.slug).map((row) => ({
@@ -192,6 +195,7 @@ export async function getMonsterManualData() {
     intelligence: number(row.intelligence), wisdom: number(row.wisdom), charisma: number(row.charisma),
     proficiencies: row.proficiencies ?? [], savingThrows: row["saving throws"] ?? [], weakness: row.weakness ?? [],
     attachmentSkills: row["attachment skills"] ?? [],
+    personalitySkill: text(row["personality skill"], ""),
     specialSkills: (row["Special Skill"] ?? []).map((skill) => ({
       name: text(skill.name ?? null), type: text(skill.type ?? null, "-"), range: text(skill.range ?? null),
       damage: text(skill.damage ?? null), description: text(skill.description ?? null, ""), power: text(skill["skill power"] ?? null),
@@ -209,7 +213,7 @@ export async function getMonsterManualData() {
   }));
   const levels: LevelChart[] = levelRows.map((row) => ({ id: row.id, level: number(row.level, 1), proficiency: text(row.proficiency, "+2"), digislot: number(row.digislot, 1) }));
 
-  return { digimon, fields, attributes, levels, skills, types };
+  return { digimon, fields, attributes, levels, skills, types, personalitySkills };
 }
 
 export function isDamagingSkill(skill: AttachmentSkill) {

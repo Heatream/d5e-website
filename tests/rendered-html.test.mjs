@@ -1,5 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
+
+test("applies stage level bands", () => {
+  assert.deepEqual(stageRange("Rookie"), [1, 4]);
+  assert.deepEqual(stageRange("Champion"), [5, 9]);
+  assert.deepEqual(stageRange("Ultimate"), [10, 14]);
+  assert.deepEqual(stageRange("Mega"), [15, 20]);
+  assert.deepEqual(stageRange(" 7th   Stage "), [15, 20]);
+  assert.deepEqual(stageRange("Unknown"), [1, 4]);
+});
+
+test("calculates progressive HP and movement", () => {
+  assert.equal(dieSize("2d20"), 20);
+  assert.equal(calculateHp("2d20", 1, 10), 20);
+  assert.equal(calculateHp("2d20", 5, 10), 100);
+  assert.equal(calculateHp("2d20", 6, 10), 110);
+  assert.equal(calculateHp("1d10", 6, 14), 67);
+  assert.equal(calculateMovement(10), 30);
+  assert.equal(calculateMovement(14), 35);
+  assert.equal(calculateMovement(8), 30);
+});
 
 const workerUrl = new URL("../dist/server/index.js", import.meta.url);
 workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
@@ -70,16 +91,15 @@ test("returns a not-found page for an unknown skill", async () => {
   assert.match(await response.text(), /That skill is not in the compendium/);
 });
 
-test("renders the level-scaled monster manual with Supabase assets", async () => {
+test("renders the searchable Monster Manual directory before any sheet", async () => {
   const response = await render("/monster-manual");
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>Monster Manual \| D5e<\/title>/i);
   assert.match(html, /Agumon/);
-  assert.match(html, /Baby Flame/);
-  assert.match(html, /Fire Heavy Strike/);
-  assert.match(html, /assets\/borders\/dr\.webp/);
-  assert.match(html, /symbol_vaccine\.webp/);
-  assert.match(html, /type="range"/);
-  assert.match(html, /max="20"/);
+  assert.match(html, /Gabumon/);
+  assert.match(html, /Search Digimon/);
+  assert.match(html, /digimon-directory-grid/);
+  assert.doesNotMatch(html, /type="range"/);
+  assert.doesNotMatch(html, /digimon-sheet/);
 });
