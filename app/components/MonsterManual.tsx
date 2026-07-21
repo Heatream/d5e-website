@@ -7,6 +7,13 @@ import { calculateHp, calculateMovement, modifier, normalizeStage, stageRange } 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
 function validType(value: string, types: TypeElement[]) { return types.find((type) => type.name.toLowerCase() === value.toLowerCase()) ?? null; }
+function printableListValue(value: unknown, keys: string[]) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  const match = keys.map((key) => record[key]).find((entry) => typeof entry === "string");
+  return typeof match === "string" ? match : "";
+}
 
 function DigimonPortrait({ src, name, className }: { src: string | null; name: string; className?: string }) {
   const [failed, setFailed] = useState(false);
@@ -90,8 +97,8 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         {special && <div className="print-special"><div><strong>{special.name}</strong><span>{special.range}</span><span>{formatPower(special.power)}</span><span>{special.damage}</span></div><p>{validType(special.type, types)?.name ?? special.type} Type</p></div>}
         <div className="print-attachments">{view.attachmentSkills.length ? view.attachmentSkills.map(({ ref, skill, type }) => <button type="button" key={`${ref.skill}-${ref.level}`} onClick={() => setExpandedSkillSlug((current) => current === ref.skill ? "" : ref.skill)} aria-expanded={expandedSkillSlug === ref.skill} aria-controls="manual-skill-details"><span>{type ? `${type.name} ${skill!.name}` : skill!.name}</span><span>{skill!.range}</span><span>{formatPower(skill!.power)}</span><span>{skill!.damage}</span></button>) : <p>No attachment skills unlocked.</p>}</div>
         <div className="print-proficiencies"><p>{selected.proficiencies.join(" · ") || "—"}</p></div>
-        <div className="print-saves"><p>{selected.savingThrows.length ? selected.savingThrows.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
-        <div className="print-weaknesses"><p>{selected.weakness.length ? selected.weakness.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
+        <div className="print-saves"><p>{selected.savingThrows.length ? selected.savingThrows.map((value, index) => { const label = printableListValue(value, ["save", "savingThrow", "name", "value"]); return label ? <span key={`${label}-${index}`}>{label}</span> : null; }) : "—"}</p></div>
+        <div className="print-weaknesses"><p>{selected.weakness.length ? selected.weakness.map((value, index) => { const label = printableListValue(value, ["weakness", "type", "name", "value"]); return label ? <span key={`${label}-${index}`}>{label}</span> : null; }) : "—"}</p></div>
         <div className="print-personality"><h3>{view.personality || "Personality"}{view.skillName ? ` · ${view.skillName}` : ""}</h3><p>{view.personalitySkill?.description ?? (view.skillName ? "Description unavailable." : "—")}</p></div>
       </article>
     </div>
