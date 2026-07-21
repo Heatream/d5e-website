@@ -63,13 +63,24 @@ type PersonalityRow = {
 type DigimonRow = {
   id: number; name: string | null; slug: string | null; attribute: string | null; field: string | null; Stage: string | null; image: string | null;
   strength: string | null; dexterity: string | null; constitution: string | null; intelligence: string | null; wisdom: string | null; charisma: string | null;
-  proficiencies: string[] | null; "saving throws": string[] | null; weakness: string[] | null; "attachment skills": DigimonSkillRef[] | null;
+  proficiencies: unknown[] | null; "saving throws": unknown[] | null; weakness: unknown[] | null; "attachment skills": DigimonSkillRef[] | null;
   "Special Skill": Array<{ name?: string; type?: string; range?: string; damage?: string; description?: string; "skill power"?: string }> | null;
   "personality skill": string | null;
 };
 type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null };
 type AttributeRow = { id: string; name: string | null; "+2 stat buff": string | null; "hp dice rookie": string | null; "hp dice champion": string | null; "hp dice ultimate": string | null; "hp dice mega": string | null; image: string | null };
 type LevelRow = { id: string; level: string | null; proficiency: string | null; digislot: string | null };
+
+function normalizeTextList(value: unknown, objectKeys: string[]): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry === "string") return entry.trim() ? [entry.trim()] : [];
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const match = objectKeys.map((key) => record[key]).find((item) => typeof item === "string" && item.trim());
+    return typeof match === "string" ? [match.trim()] : [];
+  });
+}
 
 function configuration() {
   const url = process.env.SUPABASE_URL;
@@ -193,7 +204,9 @@ export async function getMonsterManualData() {
     image: row.image?.trim() || null,
     strength: number(row.strength), dexterity: number(row.dexterity), constitution: number(row.constitution),
     intelligence: number(row.intelligence), wisdom: number(row.wisdom), charisma: number(row.charisma),
-    proficiencies: row.proficiencies ?? [], savingThrows: row["saving throws"] ?? [], weakness: row.weakness ?? [],
+    proficiencies: normalizeTextList(row.proficiencies, ["proficiency", "name", "value"]),
+    savingThrows: normalizeTextList(row["saving throws"], ["save", "savingThrow", "name", "value"]),
+    weakness: normalizeTextList(row.weakness, ["weakness", "type", "name", "value"]),
     attachmentSkills: row["attachment skills"] ?? [],
     personalitySkill: text(row["personality skill"], ""),
     specialSkills: (row["Special Skill"] ?? []).map((skill) => ({
