@@ -14,6 +14,15 @@ function authHeaders(request: NextRequest, extra: Record<string, string> = {}) {
   return { apikey: key, Authorization: authorization, "Content-Type": "application/json", ...extra };
 }
 
+async function validateParent(url: string, headers: Record<string, string>, parentId: unknown) {
+  if (!parentId) return null;
+  const response = await fetch(`${url}/rest/v1/player_digimon?id=eq.${encodeURIComponent(String(parentId))}&select=id&limit=1`, {
+    headers, cache: "no-store",
+  });
+  const rows = await response.json().catch(() => []);
+  return response.ok && rows[0] ? null : NextResponse.json({ error: "The previous evolution is unavailable." }, { status: 400 });
+}
+
 export async function GET(request: NextRequest) {
   const headers = authHeaders(request);
   if (!headers) return NextResponse.json({ error: "A session is required." }, { status: 401 });
@@ -31,6 +40,8 @@ export async function POST(request: NextRequest) {
   const { url } = config();
   const body = await request.json().catch(() => null) as { digimon?: Record<string, unknown>; skills?: Record<string, unknown>[] } | null;
   if (!body?.digimon || !Array.isArray(body.skills)) return NextResponse.json({ error: "Invalid Digimon data." }, { status: 400 });
+  const invalidParent = await validateParent(url, headers, body.digimon.parent_digimon_id);
+  if (invalidParent) return invalidParent;
 
   const parentResponse = await fetch(`${url}/rest/v1/player_digimon`, {
     method: "POST", headers, body: JSON.stringify(body.digimon), cache: "no-store",
@@ -63,6 +74,8 @@ export async function PATCH(request: NextRequest) {
   const { url } = config();
   const body = await request.json().catch(() => null) as { id?: string; digimon?: Record<string, unknown>; skills?: Record<string, unknown>[] } | null;
   if (!body?.id || !body.digimon || !Array.isArray(body.skills)) return NextResponse.json({ error: "Invalid Digimon data." }, { status: 400 });
+  const invalidParent = await validateParent(url, headers, body.digimon.parent_digimon_id);
+  if (invalidParent) return invalidParent;
 
   const parentResponse = await fetch(`${url}/rest/v1/player_digimon?id=eq.${encodeURIComponent(body.id)}`, {
     method: "PATCH", headers, body: JSON.stringify({ ...body.digimon, updated_at: new Date().toISOString() }), cache: "no-store",

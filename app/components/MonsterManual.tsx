@@ -69,11 +69,11 @@ function useAutoFitText(dependencies: unknown[]) {
   return sheetRef;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, onEdit, onDelete }: {
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, onEdit, onDelete, onDigivolve, onDedigivolve }: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean;
-  onEdit?: () => void; onDelete?: () => void;
+  onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void;
 }) {
   const [selectedSlug, setSelectedSlug] = useState(initialSelectedSlug);
   const [expandedSkillSlot, setExpandedSkillSlot] = useState<number | null>(null);
@@ -96,10 +96,13 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
       strength: selected.strength, dexterity: selected.dexterity, constitution: selected.constitution,
       intelligence: selected.intelligence, wisdom: selected.wisdom, charisma: selected.charisma,
     };
-    attribute?.statBuffs.forEach((buff) => {
+    const attributeBonuses = selected.attributeHistory?.length
+      ? selected.attributeHistory.map((name) => attributes.find((item) => item.name.toLowerCase() === name.toLowerCase())).filter(Boolean)
+      : attribute ? [attribute] : [];
+    attributeBonuses.forEach((stageAttribute) => stageAttribute?.statBuffs.forEach((buff) => {
       const key = buff.toLowerCase() as Ability;
       if (key in stats) stats[key] += 2;
-    });
+    }));
     const stageName = normalizeStage(selected.stage);
     const hitDie = attribute?.hpDice[stageName === "7th stage" ? "mega" : stageName] ?? "1d6";
     const attachmentSkills = selected.attachmentSkills
@@ -126,7 +129,9 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
     );
     return {
       attribute, field, levelRow, stats, hitDie,
-      hp: calculateHp(hitDie, level, stats.constitution), movement: calculateMovement(stats.dexterity),
+      hp: selected.hpByLevel?.[level] ?? calculateHp(hitDie, level, stats.constitution),
+      ac: (selected.baseAc ?? 10) + modifier(stats.dexterity),
+      movement: calculateMovement(stats.dexterity),
       attachmentSkills, personality, skillName, personalitySkill,
     };
   }, [selected, attributes, fields, levels, level, skills, types, personalitySkills]);
@@ -163,6 +168,8 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
           <div className="level-marks"><span>{range[0]}</span><span>{range[1]}</span></div>
         </div>
         <div className="sheet-actions">
+          {onDedigivolve && <button type="button" className="dedigivolution-button" onClick={onDedigivolve}>De-Digivolve</button>}
+          {onDigivolve && <button type="button" className="digivolution-button" onClick={onDigivolve}>Digivolve</button>}
           {!embedded && <Link className="edit-digimon-link" href={`/character-creation?template=${encodeURIComponent(selected.slug)}`}>Edit Digimon</Link>}
           {onEdit && <button type="button" className="edit-digimon-link" onClick={onEdit}>Edit</button>}
           {onDelete && <button type="button" className="delete-digimon-button" onClick={onDelete}>Delete</button>}
@@ -174,7 +181,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <h2 className="print-name" data-fit>{selected.name}</h2>
         <div className="print-level"><strong>{level}</strong></div>
         <div className="print-hp"><small>{view.hitDie}</small><strong>{view.hp}</strong></div>
-        <div className="print-ac"><span>{10 + modifier(view.stats.dexterity)}</span></div>
+        <div className="print-ac"><span>{view.ac}</span></div>
         <div className="print-prof"><span>{view.levelRow?.proficiency ?? "+2"}</span></div>
         <div className="print-dl"><strong>{view.levelRow?.digislot ?? 1}</strong></div>
         <div className="print-speed"><strong>{view.movement}<small>ft</small></strong></div>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
+import { calculateEvolvedHp, calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
 import { parseAttachmentReference, resolveSkillStage } from "../app/lib/supabase.ts";
 
 test("applies stage level bands", () => {
@@ -21,6 +21,15 @@ test("calculates progressive HP and movement", () => {
   assert.equal(calculateMovement(10), 30);
   assert.equal(calculateMovement(14), 35);
   assert.equal(calculateMovement(8), 30);
+});
+
+test("stacks evolution HP, new dice, and Constitution changes", () => {
+  const rookieAtFour = calculateHp("1d6", 4, 10);
+  const championAtFour = calculateEvolvedHp(rookieAtFour, "1d10", 10, 12, 4, 4);
+  assert.equal(championAtFour, rookieAtFour + 30 + 4);
+  assert.equal(calculateEvolvedHp(rookieAtFour, "1d10", 10, 12, 4, 6), championAtFour + 11 + 6);
+  const ultimateAtSix = calculateEvolvedHp(championAtFour + 11 + 6, "1d12", 12, 8, 6, 6);
+  assert.equal(ultimateAtSix, championAtFour + 17 + 36 - 12);
 });
 
 test("parses dotted attachment references and applies cumulative upgrades", () => {

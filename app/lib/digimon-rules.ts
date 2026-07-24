@@ -16,6 +16,23 @@ export function calculateHp(die: string, level: number, constitution: number) {
   const halfLevels = Math.max(0, level - 5);
   return Math.max(1, fullLevels * size + halfLevels * (size / 2) + modifier(constitution) * level);
 }
+export function calculateEvolvedHp(
+  parentHpAtEvolution: number,
+  die: string,
+  parentConstitution: number,
+  constitution: number,
+  evolvedAtLevel: number,
+  requestedLevel: number,
+) {
+  const anchorLevel = Math.max(1, Math.min(20, evolvedAtLevel));
+  const size = dieSize(die);
+  let hp = parentHpAtEvolution + (3 * size)
+    + ((modifier(constitution) - modifier(parentConstitution)) * anchorLevel);
+  for (let level = anchorLevel + 1; level <= requestedLevel; level += 1) {
+    hp += (level <= 5 ? size : size / 2) + modifier(constitution);
+  }
+  return Math.max(1, hp);
+}
 export function calculateMovement(dexterity: number) {
   const raw = 30 + (modifier(dexterity) / 3) * 5;
   return Math.round(raw / 5) * 5;

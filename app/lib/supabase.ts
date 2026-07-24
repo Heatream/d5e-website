@@ -48,6 +48,7 @@ export type Digimon = {
   name: string;
   slug: string;
   attribute: string;
+  attributeHistory?: string[];
   field: string;
   stage: string;
   image: string | null;
@@ -63,6 +64,10 @@ export type Digimon = {
   attachmentSkills: Array<DigimonSkillRef | null>;
   specialSkills: SpecialSkill[];
   personalitySkill: string;
+  hpByLevel?: Record<number, number>;
+  baseAc?: number;
+  parentId?: string | null;
+  evolvedAtLevel?: number | null;
 };
 
 export type Field = { id: number; name: string; abbreviation: string; symbol: string; border: string };

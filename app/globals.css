@@ -30,6 +30,7 @@
 .saved-digimon-item .selected-digimon{padding:0 1rem 1rem}.creator-steps{display:flex;overflow-x:auto;border-bottom:1px solid var(--border,#ddd)}
 .creator-panel{padding:clamp(1rem,3vw,1.5rem);border:1px solid var(--border,#ddd);border-radius:14px;background:var(--panel,#fff)}
 .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.form-grid .wide{grid-column:1/-1}
+.stage-attribute-picker{padding:.6rem .75rem!important}.stage-attribute-picker>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.55rem}.stage-attribute-picker label{font-size:.72rem}.stage-attribute-picker select{min-height:34px;padding:.35rem .5rem;font-size:.78rem}
 .creator-panel label{display:grid;gap:.38rem;font-size:.82rem;font-weight:800}.creator-panel input,.creator-panel select,.creator-panel textarea{width:100%;min-width:0;border:1px solid var(--border,#ccc);border-radius:8px;background:var(--surface,#fff);color:inherit;padding:.7rem;font:inherit}
 .creator-panel textarea{min-height:100px;resize:vertical}.creator-panel fieldset{margin:0;border:1px solid var(--border,#ddd);border-radius:12px;padding:1rem}
 .creator-panel legend{padding:0 .4rem;font-weight:900}.stat-inputs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.55rem}
@@ -47,10 +48,12 @@
 .special-option-grid fieldset[data-category="dice_size"],.special-option-grid fieldset[data-category="effect"]{grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.35rem .65rem}
 .special-option-grid fieldset[data-category="dice_size"] legend,.special-option-grid fieldset[data-category="effect"] legend{grid-column:1/-1}
 .special-heading-grid textarea{min-height:110px}
+.second-special-editor{display:grid;gap:1rem;margin-top:1.2rem;padding-top:1.2rem;border-top:2px solid var(--line)}.second-special-editor h3{margin:0;color:var(--navy);font-size:1.2rem}
 .special-option-grid legend{font-size:.8rem}.option-choice{grid-template-columns:auto 1fr auto!important;align-items:center;font-size:.76rem}.repeat-choice{grid-template-columns:1fr 54px!important;align-items:center;font-size:.76rem}
 .repeat-choice input{padding:.35rem!important}.option-choice input{width:auto}
 .option-choice input{width:auto}.option-choice small{font-variant-numeric:tabular-nums}.creator-preview .selected-digimon{margin:0}
 @media(max-width:1000px){.special-option-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){.stage-attribute-picker>div{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.form-grid{grid-template-columns:1fr}.special-option-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid .wide{grid-column:auto}.stat-inputs{grid-template-columns:repeat(3,1fr)}.proficiency-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.attachment-form-list>div{grid-template-columns:1fr 1fr}.attachment-form-list>div strong{grid-column:1/-1}.creation-list-heading{align-items:flex-start;flex-direction:column}.sheet-level-controls{align-items:stretch;flex-direction:column}}
 
 * { box-sizing: border-box; }
@@ -449,11 +452,15 @@ button { cursor: pointer; }
 @keyframes accordion-slide { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .sheet-level-controls { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px 14px; }
 .sheet-actions { display: flex; align-items: center; gap: 8px; }
-.sheet-actions .edit-digimon-link,.sheet-actions .delete-digimon-button { min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; font-size: 12px; font-weight: 850; text-decoration: none; white-space: nowrap; }
+.sheet-actions .edit-digimon-link,.sheet-actions .delete-digimon-button,.sheet-actions .digivolution-button,.sheet-actions .dedigivolution-button { min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; font-size: 12px; font-weight: 850; text-decoration: none; white-space: nowrap; }
 .sheet-actions .edit-digimon-link { border: 1px solid var(--blue); color: var(--blue); background: white; }
+.sheet-actions .digivolution-button { border: 1px solid #c7aa58; color: #6f5715; background: #fff9e8; }
+.sheet-actions .dedigivolution-button { border: 1px solid #8b69b8; color: #62458b; background: #f7f0ff; }
 .sheet-actions .delete-digimon-button { border: 1px solid #c43b3b; color: #a42323; background: #fff7f7; }
 .sheet-actions .edit-digimon-link:hover { color: white; background: var(--blue); }
 .sheet-actions .delete-digimon-button:hover { color: white; background: #b42d2d; }
+.sheet-actions .digivolution-button:hover { color: white; background: #94721e; }
+.sheet-actions .dedigivolution-button:hover { color: white; background: #73519f; }
 .back-to-directory { min-height: 42px; padding: 0 16px; border: 1px solid #cbd5d4; border-radius: 7px; color: var(--navy); background: white; font-weight: 800; }
 .back-to-directory:hover { color: var(--blue); border-color: var(--blue); }
 .level-control { display: flex; flex-direction: column; gap: 7px; }
@@ -555,7 +562,7 @@ button { cursor: pointer; }
   .manual-controls { grid-template-columns: 1fr; gap: 16px; }
   .sheet-level-controls { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .sheet-actions { gap: 5px; }
-  .sheet-actions .edit-digimon-link,.sheet-actions .delete-digimon-button { min-height: 32px; padding-inline: 9px; font-size: 10px; }
+  .sheet-actions .edit-digimon-link,.sheet-actions .delete-digimon-button,.sheet-actions .digivolution-button,.sheet-actions .dedigivolution-button { min-height: 32px; padding-inline: 9px; font-size: 10px; }
   .manual-skill-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manual-skill-stats div { border-bottom: 1px solid var(--line); }
   .page-shell { width: min(100% - 24px, 1160px); }
