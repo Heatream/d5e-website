@@ -1,0 +1,136 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { formatPower, hasSkillStages, skillStageValue, type AttachmentSkill, type SkillStage, type TypeElement } from "../lib/supabase";
+
+const colors: Record<string, string> = {
+  darkness: "#71617d",
+  earth: "#a8743a",
+  fire: "#df4b32",
+  ice: "#4d9bb6",
+  light: "#d19b23",
+  lightning: "#c39416",
+  null: "#68727b",
+  plant: "#4d8b55",
+  steel: "#637783",
+  water: "#3d78b6",
+  wind: "#4b947c",
+};
+const labels: Record<string, string> = { darkness: "Dk", earth: "Ea", fire: "Fi", ice: "Ic", light: "Lt", lightning: "Li", null: "Nu", plant: "Pl", steel: "St", water: "Wa", wind: "Wi" };
+
+function validNavigationType(types: TypeElement[], skillName: string) {
+  if (typeof window === "undefined") return null;
+  const slug = skillName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const stored = sessionStorage.getItem(`d5eSkillType:${slug}`);
+  if (stored) sessionStorage.removeItem(`d5eSkillType:${slug}`);
+  const candidate = stored ?? window.history.state?.d5eSkillType;
+  if (typeof candidate !== "string") return null;
+  return types.find((type) => type.name.toLowerCase() === candidate.toLowerCase()) ?? null;
+}
+
+export function TypeSelector({
+  skillName,
+  description,
+  types,
+  skill,
+}: {
+  skillName: string;
+  description: string;
+  types: TypeElement[];
+  skill: AttachmentSkill;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [assigned, setAssigned] = useState(false);
+  const [stage, setStage] = useState<SkillStage>(1);
+
+  useEffect(() => {
+    const navigationType = validNavigationType(types, skillName);
+    if (navigationType) {
+      setSelectedId(navigationType.id);
+      setAssigned(true);
+    }
+  }, [types, skillName]);
+
+  const selected = useMemo(
+    () => types.find((type) => type.id === selectedId) ?? null,
+    [selectedId, types],
+  );
+  const stageValue = skillStageValue(skill, stage);
+  const damage = stageValue ?? `DC 8 + Prof + ${formatPower(skill.power)} mod${stage > 1 ? ` + ${(stage - 1) * 5}` : ""}`;
+
+  return (
+    <>
+      <div className="detail-title-row">
+        <div>
+          <p className="eyebrow">Attachment Skill</p>
+          <h1>{selected ? `${selected.name} ${skillName}` : skillName}</h1>
+        </div>
+        {selected && (
+          <span
+            className="selected-type-badge"
+            style={{ "--type-color": colors[selected.name.toLowerCase()] ?? "#68727b" } as React.CSSProperties}
+          >
+            {selected.name}
+          </span>
+        )}
+        {!types.length && <span className="utility-badge">Utility</span>}
+      </div>
+
+      <section className="description-block" aria-labelledby="description-title">
+        <h2 id="description-title">Description</h2>
+        <p>{description}</p>
+        {selected && (
+          <div className="type-effect" aria-live="polite">
+            <span style={{ background: colors[selected.name.toLowerCase()] ?? "#68727b" }} aria-hidden="true" />
+            <div>
+              <strong>{selected.name} effect</strong>
+              <p>{selected.effect}</p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {hasSkillStages(skill) && <section className="stage-control" aria-labelledby="stage-title">
+        <div className="section-heading-row"><div><p className="section-kicker">Move progression</p><h2 id="stage-title">Stage</h2></div></div>
+        <div className="skill-stage-picker" role="group" aria-label={`${skillName} stage`}>
+          {([1, 2, 3] as SkillStage[]).map((value) => <button key={value} type="button" className={stage === value ? "selected" : ""} aria-pressed={stage === value} onClick={() => setStage(value)}>{value === 1 ? "I" : value === 2 ? "II" : "III"}</button>)}
+        </div>
+      </section>}
+
+      <dl className="stat-grid" aria-label="Skill statistics">
+        <div><dt>Skill Power</dt><dd>{formatPower(skill.power)}</dd></div>
+        <div><dt>Skill Time</dt><dd>{skill.time}</dd></div>
+        <div><dt>Damage / DC</dt><dd>{damage}</dd></div>
+        <div><dt>Duration</dt><dd>{skill.duration}</dd></div>
+        <div><dt>Range</dt><dd>{skill.range}</dd></div>
+      </dl>
+
+      {types.length > 0 && <section className="type-control" aria-labelledby="type-title">
+        <div className="section-heading-row">
+          <div>
+            <p className="section-kicker">Elemental modifier</p>
+            <h2 id="type-title">Type</h2>
+          </div>
+          {selected && !assigned && (
+            <button className="clear-type" type="button" onClick={() => setSelectedId(null)}>
+              Clear type
+            </button>
+          )}
+        </div>
+
+        {assigned && selected ? (
+          <div className="assigned-type-note">
+            This move was assigned the <strong>{selected.name}</strong> type by its character sheet.
+          </div>
+        ) : (
+          <div className="detail-type-buttons">
+            <span>Choose an element to preview its name and combat effect.</span>
+            <div className="mini-type-row" role="group" aria-label="Choose elemental type">
+              {types.map((type) => <button key={type.id} type="button" title={type.name} aria-label={type.name} aria-pressed={selectedId === type.id} className={selectedId === type.id ? "selected" : ""} style={{ "--type-color": colors[type.name.toLowerCase()] ?? "#68727b" } as React.CSSProperties} onClick={() => setSelectedId(selectedId === type.id ? null : type.id)}>{labels[type.name.toLowerCase()] ?? type.name.slice(0, 2)}</button>)}
+            </div>
+          </div>
+        )}
+      </section>}
+    </>
+  );
+}
