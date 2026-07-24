@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   formatPower, resolveSkillStage, skillStageValue, type AttachmentSkill, type Attribute,
   type Digimon, type Field, type LevelChart, type PersonalitySkill, type TypeElement,
@@ -68,15 +69,17 @@ function useAutoFitText(dependencies: unknown[]) {
   return sheetRef;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills }: {
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, onEdit, onDelete }: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
+  initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean;
+  onEdit?: () => void; onDelete?: () => void;
 }) {
-  const [selectedSlug, setSelectedSlug] = useState("");
+  const [selectedSlug, setSelectedSlug] = useState(initialSelectedSlug);
   const [expandedSkillSlot, setExpandedSkillSlot] = useState<number | null>(null);
   const [expandedSpecialIndex, setExpandedSpecialIndex] = useState<number | null>(null);
   const [query, setQuery] = useState("");
-  const [level, setLevel] = useState(1);
+  const [level, setLevel] = useState(initialLevel ?? 1);
   const selected = digimon.find((item) => item.slug === selectedSlug) ?? null;
   const sheetRef = useAutoFitText([selectedSlug, level, expandedSkillSlot, expandedSpecialIndex]);
   const filtered = useMemo(
@@ -144,7 +147,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
 
   if (!digimon.length) return <div className="empty-state"><h2>No Digimon available</h2><p>The field guide has no entries yet.</p></div>;
 
-  const range = selected ? stageRange(selected.stage) : stageRange("rookie");
+  const range = levelBounds ?? (selected ? stageRange(selected.stage) : stageRange("rookie"));
   const specialSkills = selected?.specialSkills ?? [];
   const expandedSpecial = expandedSpecialIndex === null ? null : specialSkills[expandedSpecialIndex] ?? null;
   const expandedSpecialType = expandedSpecial ? validType(expandedSpecial.type, types) : null;
@@ -158,6 +161,11 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
           <div><span>D-Level · {selected.stage}</span><strong>{level}</strong></div>
           <input type="range" min={range[0]} max={range[1]} value={level} onChange={(event) => { setLevel(Number(event.target.value)); setExpandedSkillSlot(null); setExpandedSpecialIndex(null); }} aria-label={`${selected.name} level`} />
           <div className="level-marks"><span>{range[0]}</span><span>{range[1]}</span></div>
+        </div>
+        <div className="sheet-actions">
+          {!embedded && <Link className="edit-digimon-link" href={`/character-creation?template=${encodeURIComponent(selected.slug)}`}>Edit Digimon</Link>}
+          {onEdit && <button type="button" className="edit-digimon-link" onClick={onEdit}>Edit</button>}
+          {onDelete && <button type="button" className="delete-digimon-button" onClick={onDelete}>Delete</button>}
         </div>
       </div>
       <article ref={sheetRef} className="digimon-sheet" aria-label={`${selected.name} level ${level} stat sheet`}>
@@ -228,6 +236,8 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
       </section>}
     </section>
   ) : null;
+
+  if (embedded) return selectedContent ?? <div className="empty-state"><p>Complete the form to preview the sheet.</p></div>;
 
   return <section className="manual-directory" aria-label="Digimon directory">
     <div className="manual-search-row">

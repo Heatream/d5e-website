@@ -74,6 +74,31 @@ export type LevelChart = {
   attachmentSkill: number;
   savingThrows: number;
   attachmentSkillUpgrade: number;
+  asiIncrease: number;
+};
+
+export type DigimonStage = {
+  id: number;
+  name: string;
+  slug: string;
+  minimumLevel: number;
+  maximumLevel: number;
+  specialSkillPoints: number;
+  baseAc: number;
+  specialSkillAmount: number;
+  asiIncrease: number;
+};
+
+export type SpecialSkillOption = {
+  id: number;
+  category: string;
+  key: string;
+  name: string;
+  pointCost: number;
+  repeatable: boolean;
+  prerequisite: string[];
+  replaces: string | null;
+  maximum: number | null;
 };
 
 type SkillRow = {
@@ -101,7 +126,17 @@ type AttributeRow = {
 type LevelRow = {
   level: number | string | null; proficiency: number | string | null; digislot: number | string | null;
   attachment_skill: number | string | null; saving_throws: number | string | null;
-  attachment_skill_upgrade: number | string | null;
+  attachment_skill_upgrade: number | string | null; asi_increase: number | string | null;
+};
+type DigimonStageRow = {
+  id: number; name: string | null; slug: string | null; level_slider_min: number | null;
+  level_slider_max: number | null; ss_points: number | null; base_ac: number | null;
+  ss_ammount: number | null; asi_increase: number | null;
+};
+type SpecialSkillOptionRow = {
+  id: number; category: string | null; option_key: string | null; name: string | null;
+  point_cost: number | null; repeatable: boolean | null; pre_requisite: string | null;
+  replaces_option: string | null; maximum_category_option: number | null;
 };
 
 const ABILITIES: Record<string, string> = {
@@ -270,10 +305,41 @@ export async function getMonsterManualData() {
   const levels: LevelChart[] = levelRows.map((row) => ({
     level: number(row.level, 1), proficiency: text(row.proficiency, "+2"), digislot: number(row.digislot, 1),
     attachmentSkill: number(row.attachment_skill), savingThrows: number(row.saving_throws, 1),
-    attachmentSkillUpgrade: number(row.attachment_skill_upgrade),
+    attachmentSkillUpgrade: number(row.attachment_skill_upgrade), asiIncrease: number(row.asi_increase),
   }));
 
   return { digimon, fields, attributes, levels, skills, types, personalitySkills };
+}
+
+export async function getCharacterCreationData() {
+  const [manual, stageRows, specialRows] = await Promise.all([
+    getMonsterManualData(),
+    request<DigimonStageRow[]>("Digimon Stage", "select=*&order=id.asc"),
+    request<SpecialSkillOptionRow[]>("Special Skill Table", "select=*&order=id.asc"),
+  ]);
+  const stages: DigimonStage[] = stageRows.filter((row) => row.name && row.slug).map((row) => ({
+    id: row.id,
+    name: text(row.name),
+    slug: text(row.slug, "rookie"),
+    minimumLevel: number(row.level_slider_min, 1),
+    maximumLevel: number(row.level_slider_max, 4),
+    specialSkillPoints: number(row.ss_points),
+    baseAc: number(row.base_ac, 10),
+    specialSkillAmount: number(row.ss_ammount, 1),
+    asiIncrease: number(row.asi_increase, 10),
+  }));
+  const specialSkillOptions: SpecialSkillOption[] = specialRows.filter((row) => row.category && row.option_key && row.name).map((row) => ({
+    id: row.id,
+    category: text(row.category, ""),
+    key: text(row.option_key, ""),
+    name: text(row.name),
+    pointCost: number(row.point_cost),
+    repeatable: Boolean(row.repeatable),
+    prerequisite: commaList(row.pre_requisite),
+    replaces: cleanNullable(row.replaces_option),
+    maximum: row.maximum_category_option === null ? null : number(row.maximum_category_option),
+  }));
+  return { ...manual, stages, specialSkillOptions };
 }
 
 export function skillStageValue(skill: AttachmentSkill, stage: SkillStage): string | null {
