@@ -79,13 +79,25 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
   const [expandedSkillSlot, setExpandedSkillSlot] = useState<number | null>(null);
   const [expandedSpecialIndex, setExpandedSpecialIndex] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [attributeFilter, setAttributeFilter] = useState("");
+  const [fieldFilter, setFieldFilter] = useState("");
   const [level, setLevel] = useState(initialLevel ?? 1);
   const selected = digimon.find((item) => item.slug === selectedSlug) ?? null;
   const sheetRef = useAutoFitText([selectedSlug, level, expandedSkillSlot, expandedSpecialIndex]);
-  const filtered = useMemo(
-    () => digimon.filter((item) => `${item.name} ${item.stage} ${item.attribute} ${item.field}`.toLowerCase().includes(query.trim().toLowerCase())),
-    [digimon, query],
-  );
+  const stageOptions = useMemo(() => [...new Set(digimon.map((item) => item.stage).filter(Boolean))], [digimon]);
+  const attributeOptions = useMemo(() => [...new Set(digimon.map((item) => item.attribute).filter(Boolean))], [digimon]);
+  const fieldOptions = useMemo(() => [...new Set(digimon.map((item) => item.field).filter(Boolean))], [digimon]);
+  const filtered = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return digimon.filter((item) => {
+      if (search && !`${item.name} ${item.stage} ${item.attribute} ${item.field}`.toLowerCase().includes(search)) return false;
+      if (stageFilter && item.stage.toLowerCase() !== stageFilter.toLowerCase()) return false;
+      if (attributeFilter && item.attribute.toLowerCase() !== attributeFilter.toLowerCase()) return false;
+      if (fieldFilter && item.field.toLowerCase() !== fieldFilter.toLowerCase()) return false;
+      return true;
+    });
+  }, [digimon, query, stageFilter, attributeFilter, fieldFilter]);
 
   const view = useMemo(() => {
     if (!selected) return null;
@@ -248,8 +260,20 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
 
   return <section className="manual-directory" aria-label="Digimon directory">
     <div className="manual-search-row">
-      <label className="search-box"><span>Search Digimon</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, stage, attribute, or field" /></label>
-      <p aria-live="polite"><strong>{filtered.length}</strong> Digimon</p>
+      <div className="directory-search-and-filters">
+        <label className="search-field">
+          <span className="search-icon" aria-hidden="true">⌕</span>
+          <span className="sr-only">Search Digimon</span>
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Digimon by name…" />
+          {query && <button type="button" onClick={() => setQuery("")}>Clear</button>}
+        </label>
+        <div className="filter-row" aria-label="Filter Digimon">
+          <label><span>Stage</span><select value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{stageOptions.map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label>
+          <label><span>Attribute</span><select value={attributeFilter} onChange={(event) => setAttributeFilter(event.target.value)}><option value="">All attributes</option>{attributeOptions.map((attribute) => <option value={attribute} key={attribute}>{attribute}</option>)}</select></label>
+          <label><span>Field</span><select value={fieldFilter} onChange={(event) => setFieldFilter(event.target.value)}><option value="">All fields</option>{fieldOptions.map((field) => <option value={field} key={field}>{fields.find((item) => item.abbreviation.toLowerCase() === field.toLowerCase())?.name ?? field}</option>)}</select></label>
+        </div>
+      </div>
+      <p aria-live="polite"><strong>{filtered.length}</strong> / {digimon.length} Digimon</p>
     </div>
     {filtered.length ? <div className="digimon-directory-grid">{filtered.map((item) => {
       const field = fields.find((entry) => entry.abbreviation.toLowerCase() === item.field.toLowerCase());
@@ -262,6 +286,6 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         </button>
         {isSelected && selectedContent}
       </div>;
-    })}</div> : <div className="empty-state"><h2>No matching Digimon</h2><p>Try a different name, stage, attribute, or field.</p></div>}
+    })}</div> : <div className="empty-state"><h2>No matching Digimon</h2><p>Try a different name or filter.</p><button type="button" onClick={() => { setQuery(""); setStageFilter(""); setAttributeFilter(""); setFieldFilter(""); }}>Clear filters</button></div>}
   </section>;
 }

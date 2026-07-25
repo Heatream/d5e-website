@@ -1,7 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { calculateEvolvedHp, calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
-import { parseAttachmentReference, resolveSkillStage } from "../app/lib/supabase.ts";
+import { getCharacterCreationData, getItems, parseAttachmentReference, parseAttributeHistory, resolveSkillStage } from "../app/lib/supabase.ts";
+import { accountEmail, normalizeUsername, validateUsername } from "../app/lib/account-rules.ts";
+import { addMatchingDice } from "../app/lib/special-skill-rules.ts";
+
+test("adds matching dice to Special Skill damage", () => {
+  assert.equal(addMatchingDice("1d6", 1), "2d6");
+  assert.equal(addMatchingDice("1d8", 1), "2d8");
+  assert.equal(addMatchingDice("2d10", 2), "4d10");
+  assert.equal(addMatchingDice("DC", 1), "DC");
+});
+
+test("loads Agumon's Special Skill builder choices", async () => {
+  const data = await getCharacterCreationData();
+  const babyFlame = data.digimon.find((digimon) => digimon.slug === "agumon")?.specialSkills[0];
+  assert.equal(babyFlame?.options?.dice_size, "1d6_dmg");
+  assert.equal(babyFlame?.options?.skill_power, "power_con");
+  assert.equal(babyFlame?.repeats?.add_dice, 1);
+  assert.equal(babyFlame?.repeats?.add_30ft, 1);
+  assert.deepEqual(babyFlame?.types, ["Fire"]);
+  assert.equal(addMatchingDice("1d6", babyFlame?.repeats?.add_dice ?? 0), "2d6");
+});
+
+test("normalizes and validates account usernames", () => {
+  assert.equal(normalizeUsername("  Digi   Tamer  "), "digi tamer");
+  assert.equal(accountEmail(normalizeUsername("Digi Tamer")), accountEmail(normalizeUsername("digi tamer")));
+  assert.match(accountEmail("digi tamer"), /^d5e-[a-f0-9]{64}@accounts\.invalid$/);
+  assert.equal(validateUsername("ab").error !== undefined, true);
+  assert.equal(validateUsername("Digi!Tamer").error !== undefined, true);
+  assert.equal(validateUsername("Digi Tamer").normalized, "digi tamer");
+});
 
 test("applies stage level bands", () => {
   assert.deepEqual(stageRange("Rookie"), [1, 4]);
@@ -53,6 +82,17 @@ test("parses dotted attachment references and applies cumulative upgrades", () =
   assert.equal(dcSkill.typeToken, null);
 });
 
+test("parses official Digimon attributes as an ordered evolution history", () => {
+  assert.deepEqual(parseAttributeHistory("vaccine,vaccine,vaccine"), {
+    history: ["vaccine", "vaccine", "vaccine"],
+    current: "vaccine",
+  });
+  assert.deepEqual(parseAttributeHistory("vaccine, data, virus"), {
+    history: ["vaccine", "data", "virus"],
+    current: "virus",
+  });
+});
+
 const workerUrl = new URL("../dist/server/index.js", import.meta.url);
 workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
 const { default: worker } = await import(workerUrl.href);
@@ -85,6 +125,7 @@ test("renders the complete attachment skill directory", async () => {
   assert.match(html, /Heavy Strike/);
   assert.match(html, /Texture Blow/);
   assert.match(html, /Personality Skills/);
+  assert.match(html, /Non-damaging/);
   assert.match(html, /Great Embrace/);
   assert.match(html, /Adoring/);
   assert.match(html, /skill-accordion/);
@@ -131,7 +172,26 @@ test("renders the searchable Monster Manual directory before any sheet", async (
   assert.match(html, /Agumon/);
   assert.match(html, /Gabumon/);
   assert.match(html, /Search Digimon/);
+  assert.match(html, /All stages/);
+  assert.match(html, /All attributes/);
+  assert.match(html, /All fields/);
   assert.match(html, /digimon-directory-grid/);
   assert.doesNotMatch(html, /type="range"/);
   assert.doesNotMatch(html, /class="digimon-sheet"/);
+});
+
+test("renders the compact searchable Items directory", async () => {
+  const items = await getItems();
+  assert.equal(items.length, 20);
+  assert.deepEqual(items.slice(0, 3).map((item) => item.id), [101, 102, 103]);
+
+  const response = await render("/items");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>Items \| D5e<\/title>/i);
+  assert.match(html, /ATK Augment Chip/);
+  assert.match(html, /Black Digitron/);
+  assert.match(html, /Raise STR by proficiency/);
+  assert.match(html, /Search by item or effect/);
+  assert.match(html, /All types/);
 });

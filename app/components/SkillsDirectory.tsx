@@ -21,6 +21,10 @@ function isDamaging(damage: string | null) {
   return value !== "" && value !== "-" && value !== "—" && value !== "none";
 }
 
+function hasDamageDie(skill: AttachmentSkill) {
+  return [skill.damage, skill.stageTwo, skill.stageThree].some((value) => /\b\d+d\d+\b/i.test(value ?? ""));
+}
+
 function AttachmentRow({ skill, types }: { skill: AttachmentSkill; types: TypeElement[] }) {
   const [selectedType, setSelectedType] = useState("");
   const [stage, setStage] = useState<SkillStage>(1);
@@ -94,11 +98,17 @@ export function SkillsDirectory({
 }) {
   const [tab, setTab] = useState<Tab>("attachment");
   const [query, setQuery] = useState("");
+  const [damageFilter, setDamageFilter] = useState("");
 
   const filteredAttachments = useMemo(() => {
     const search = query.trim().toLowerCase();
-    return search ? attachmentSkills.filter((skill) => skill.name.toLowerCase().includes(search)) : attachmentSkills;
-  }, [attachmentSkills, query]);
+    return attachmentSkills.filter((skill) => {
+      if (search && !skill.name.toLowerCase().includes(search)) return false;
+      if (damageFilter === "damaging" && !hasDamageDie(skill)) return false;
+      if (damageFilter === "non-damaging" && hasDamageDie(skill)) return false;
+      return true;
+    });
+  }, [attachmentSkills, query, damageFilter]);
 
   const personalityGroups = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -124,17 +134,20 @@ export function SkillsDirectory({
         <button role="tab" aria-selected={tab === "attachment"} className={tab === "attachment" ? "selected" : ""} onClick={() => { setTab("attachment"); setQuery(""); }}>
           <span>Attachment Skills</span><b>{attachmentSkills.length}</b>
         </button>
-        <button role="tab" aria-selected={tab === "personality"} className={tab === "personality" ? "selected" : ""} onClick={() => { setTab("personality"); setQuery(""); }}>
+        <button role="tab" aria-selected={tab === "personality"} className={tab === "personality" ? "selected" : ""} onClick={() => { setTab("personality"); setQuery(""); setDamageFilter(""); }}>
           <span>Personality Skills</span><b>{personalitySkills.length}</b>
         </button>
       </div>
       <div className="directory-tools">
-        <label className="search-field">
-          <span className="sr-only">Search {tab} skills</span>
-          <span className="search-icon" aria-hidden="true">⌕</span>
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "attachment" ? "Search attachment skills..." : "Search skills or personalities..."} autoComplete="off" />
-          {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search">Clear</button>}
-        </label>
+        <div className="directory-search-and-filters">
+          <label className="search-field">
+            <span className="sr-only">Search {tab} skills</span>
+            <span className="search-icon" aria-hidden="true">⌕</span>
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "attachment" ? "Search attachment skills…" : "Search skills or personalities…"} autoComplete="off" />
+            {query && <button type="button" onClick={() => setQuery("")} aria-label="Clear search">Clear</button>}
+          </label>
+          {tab === "attachment" && <div className="filter-row"><label><span>Damage</span><select value={damageFilter} onChange={(event) => setDamageFilter(event.target.value)}><option value="">All skills</option><option value="damaging">Damaging</option><option value="non-damaging">Non-damaging</option></select></label></div>}
+        </div>
         <p className="result-count" aria-live="polite"><strong>{count}</strong> / {total} skills</p>
       </div>
 
@@ -148,7 +161,7 @@ export function SkillsDirectory({
           </section>
         ))}
         {count === 0 && (
-          <div className="empty-state"><span aria-hidden="true">◇</span><h3>No skills found</h3><p>Try a different name or clear your search.</p><button type="button" onClick={() => setQuery("")}>Clear search</button></div>
+          <div className="empty-state"><span aria-hidden="true">◇</span><h3>No skills found</h3><p>Try a different name or filter.</p><button type="button" onClick={() => { setQuery(""); setDamageFilter(""); }}>Clear filters</button></div>
         )}
       </div>
     </section>

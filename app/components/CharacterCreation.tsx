@@ -8,8 +8,9 @@ import type {
   SpecialSkill, SpecialSkillOption, TypeElement,
 } from "../lib/supabase";
 import { calculateEvolvedHp, calculateHp, modifier, normalizeStage } from "../lib/digimon-rules";
+import { addMatchingDice } from "../lib/special-skill-rules";
 
-type Session = { accessToken: string; refreshToken: string; expiresAt: number; userId: string };
+type Account = { username: string; rootCount: number; limit: number; limitUnlocked: boolean };
 type SavedSkillRow = {
   skill_kind?: string; slot_number?: number; attachment_skill_id?: string | null; element_id?: string | null;
   attachment_stage?: number | null; personality_skill_id?: string | null; special_skill_choices?: Record<string, unknown> | null;
@@ -30,7 +31,6 @@ type FormState = {
   specialTwo: SpecialDraft;
 };
 
-const SESSION_KEY = "d5e-anonymous-session";
 const abilities = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"] as const;
 const categoryLabels: Record<string, string> = {
   skill_power: "Power", duration: "Action Time", hit_type: "Hit Type", range: "Range",
@@ -78,21 +78,6 @@ function initialForm(stages: DigimonStage[], attributes: Attribute[], fields: Fi
   };
 }
 
-async function getSession(): Promise<Session> {
-  const stored = localStorage.getItem(SESSION_KEY);
-  const current = stored ? JSON.parse(stored) as Session : null;
-  const refreshToken = current && current.expiresAt > Math.floor(Date.now() / 1000) + 60 ? undefined : current?.refreshToken;
-  if (current && !refreshToken) return current;
-  const response = await fetch("/api/anonymous-session", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(refreshToken ? { refreshToken } : {}),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? "Could not start an anonymous session.");
-  localStorage.setItem(SESSION_KEY, JSON.stringify(result));
-  return result;
-}
-
 export function CharacterCreation(props: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
@@ -107,6 +92,13 @@ export function CharacterCreation(props: {
   const [editingId, setEditingId] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [dmOverrideOpen, setDmOverrideOpen] = useState(false);
+  const [dmPassword, setDmPassword] = useState("");
 
   const stage = props.stages.find((item) => item.id === form.stageId) ?? props.stages[0];
   const levelRow = props.levels.find((item) => item.level === form.level) ?? props.levels[0];
@@ -139,6 +131,14 @@ export function CharacterCreation(props: {
       { length: templateStageIndex + 1 },
       (_, index) => index === templateStageIndex ? templateAttribute?.id ?? fallbackAttributeId : fallbackAttributeId,
     );
+    const templateSpecial = template.specialSkills[0];
+    const templateSpecialTwo = template.specialSkills[1];
+    const specialTypeIds = (templateSpecial?.types ?? [templateSpecial?.type ?? ""])
+      .map((name) => props.types.find((item) => item.name.toLowerCase() === name.toLowerCase())?.id)
+      .filter((id): id is string => Boolean(id));
+    const secondTypeIds = (templateSpecialTwo?.types ?? [templateSpecialTwo?.type ?? ""])
+      .map((name) => props.types.find((item) => item.name.toLowerCase() === name.toLowerCase())?.id)
+      .filter((id): id is string => Boolean(id));
     setForm((current) => ({
       ...current, name: template.name, speciesName: template.name, image: template.image ?? "",
       stageId: templateStage?.id ?? current.stageId, level: templateStage?.minimumLevel ?? current.level,
@@ -153,25 +153,93 @@ export function CharacterCreation(props: {
         const element = props.types.find((item) => item.name.toLowerCase() === ref?.typeToken?.toLowerCase());
         return { skillId: skill?.id ?? "", elementId: element?.id ?? "", powerOverride: ref?.powerOverride ?? "", stage: ref?.startingStage ?? 1 };
       }),
-      specialName: template.specialSkills[0]?.name ?? "", specialDescription: template.specialSkills[0]?.description ?? "",
-      specialTypeId: props.types.find((item) => item.name.toLowerCase() === template.specialSkills[0]?.type.toLowerCase())?.id ?? "",
-      specialStage: 1,
+      specialName: templateSpecial?.name ?? "", specialDescription: templateSpecial?.description ?? "",
+      specialTypeId: specialTypeIds[0] ?? "", specialExtraTypeIds: specialTypeIds.slice(1),
+      specialStage: templateSpecial?.stage ?? 1,
+      specialChoices: templateSpecial?.options ?? {},
+      repeatCounts: templateSpecial?.repeats ?? {},
+      specialTwo: {
+        name: templateSpecialTwo?.name ?? "", description: templateSpecialTwo?.description ?? "",
+        typeId: secondTypeIds[0] ?? "", extraTypeIds: secondTypeIds.slice(1),
+        stage: templateSpecialTwo?.stage ?? 1,
+        choices: templateSpecialTwo?.options ?? {},
+        repeatCounts: templateSpecialTwo?.repeats ?? {},
+      },
     }));
     setMode("details");
   }, [searchParams, props.digimon, props.stages, props.attributes, props.fields, props.personalitySkills, props.skills, props.types]);
 
+  async function refreshAccount() {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    if (!response.ok) {
+      setAccount(null);
+      return null;
+    }
+    const result = await response.json() as Account & { authenticated: boolean };
+    const next = { username: result.username, rootCount: result.rootCount, limit: result.limit, limitUnlocked: result.limitUnlocked };
+    setAccount(next);
+    return next;
+  }
+
   async function loadSavedDigimon() {
-    const session = await getSession();
-    const response = await fetch("/api/player-digimon", { headers: { Authorization: `Bearer ${session.accessToken}` } });
+    const response = await fetch("/api/player-digimon", { cache: "no-store" });
+    if (response.status === 401) {
+      setAccount(null);
+      setSaved([]);
+      return;
+    }
     if (!response.ok) throw new Error("Could not load saved Digimon.");
     setSaved(await response.json());
   }
 
   useEffect(() => {
-    loadSavedDigimon().catch((error) => setStatus(error.message));
-  // Loading once per browser session is intentional.
+    refreshAccount()
+      .then((current) => current ? loadSavedDigimon() : undefined)
+      .catch((error) => setStatus(error.message))
+      .finally(() => setAuthLoading(false));
+  // Checking once on mount is intentional; authenticated mutations refresh account data.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function submitAuth() {
+    setSaving(true); setStatus("");
+    try {
+      const response = await fetch(`/api/auth/${authMode}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: authUsername, password: authPassword }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Authentication failed.");
+      await refreshAccount();
+      await loadSavedDigimon();
+      setAuthPassword("");
+      setStatus(authMode === "signup" ? "Account created. Welcome to D5e!" : "Welcome back!");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Authentication failed.");
+    } finally { setSaving(false); }
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setAccount(null); setSaved([]); setSelectedSavedId(""); setEditingId(""); setMode("list");
+    setStatus("You are logged out.");
+  }
+
+  async function unlockLimit() {
+    setSaving(true); setStatus("");
+    try {
+      const response = await fetch("/api/auth/dm-override", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: dmPassword }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not unlock this account.");
+      await refreshAccount();
+      setDmOverrideOpen(false); setDmPassword("");
+      setStatus("DM limit unlocked for this account.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not unlock this account.");
+    } finally { setSaving(false); }
+  }
 
   const selectedOptions = useMemo(() => Object.entries(form.specialChoices)
     .map(([, key]) => props.specialSkillOptions.find((option) => option.key === key))
@@ -455,14 +523,14 @@ export function CharacterCreation(props: {
   async function deleteSavedDigimon(id: string, name: string) {
     if (!window.confirm(`Delete ${name} and every evolution linked after it? This cannot be undone.`)) return;
     try {
-      const session = await getSession();
       const response = await fetch(`/api/player-digimon?id=${encodeURIComponent(id)}`, {
-        method: "DELETE", headers: { Authorization: `Bearer ${session.accessToken}` },
+        method: "DELETE",
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Could not delete the Digimon.");
       setSelectedSavedId("");
       await loadSavedDigimon();
+      await refreshAccount();
       setStatus(`${name} was deleted.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not delete the Digimon.");
@@ -487,7 +555,7 @@ export function CharacterCreation(props: {
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: specialUsesDc
         ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialStage - 1) * 5}`
-        : specialHasNoDamage ? "—" : `${damageName || "—"}${addDice && /\dd\d+/i.test(damageName) ? ` + ${addDice}d6` : ""}`,
+        : specialHasNoDamage ? "—" : addMatchingDice(damageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
     };
   }
@@ -511,7 +579,7 @@ export function CharacterCreation(props: {
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: secondUsesDc
         ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialTwo.stage - 1) * 5}`
-        : secondHasNoDamage ? "—" : `${secondDamageName || "—"}${addDice && /\dd\d+/i.test(secondDamageName) ? ` + ${addDice}d6` : ""}`,
+        : secondHasNoDamage ? "—" : addMatchingDice(secondDamageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
     };
   }
@@ -537,7 +605,11 @@ export function CharacterCreation(props: {
     }
     setSaving(true); setStatus("");
     try {
-      const session = await getSession();
+      if (!account) throw new Error("Log in before saving a Digimon.");
+      if (!editingId && !form.parentDigimonId && account.rootCount >= account.limit && !account.limitUnlocked) {
+        setDmOverrideOpen(true);
+        throw new Error("This account has reached its 50 Digimon limit. Enter the DM password to continue.");
+      }
       const skillRows: Record<string, unknown>[] = form.attachments.slice(0, attachmentSlots).flatMap((entry, index) => {
         if (!entry.skillId) return [];
         const selectedSkill = props.skills.find((item) => item.id === entry.skillId);
@@ -580,11 +652,11 @@ export function CharacterCreation(props: {
       });
       const currentAttributeId = form.stageAttributeIds.slice(0, stageIndex + 1).at(-1) ?? form.attributeId;
       const response = await fetch("/api/player-digimon", {
-        method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
+        method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: editingId || undefined,
           digimon: {
-            user_id: session.userId, template_id: null, name: form.name.trim(),
+            template_id: null, name: form.name.trim(),
             species_name: form.speciesName.trim() || form.name.trim(), level: form.level, stage_id: stage.id,
             attribute_id: currentAttributeId, stage_attribute_ids: form.stageAttributeIds.slice(0, stageIndex + 1),
             parent_digimon_id: form.parentDigimonId, evolved_at_level: form.evolvedAtLevel,
@@ -600,8 +672,12 @@ export function CharacterCreation(props: {
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "Could not save the Digimon.");
+      if (!response.ok) {
+        if (result.code === "DIGIMON_LIMIT_REACHED") setDmOverrideOpen(true);
+        throw new Error(result.error ?? "Could not save the Digimon.");
+      }
       await loadSavedDigimon(); setSelectedSavedId(String(result.id)); setMode("list"); setStatus(`${form.name} was ${editingId ? "updated" : "saved"}.`);
+      await refreshAccount();
       setEditingId("");
       setForm(initialForm(props.stages, props.attributes, props.fields));
     } catch (error) {
@@ -616,6 +692,20 @@ export function CharacterCreation(props: {
     </div>
     {tab === "characters" ? <div className="empty-state"><h2>Characters</h2><p>Character creation is coming later.</p></div> : <>
       {status && <p className="creation-status" role="status">{status}</p>}
+      {authLoading ? <div className="loading-state">Checking your account…</div> : !account ? <section className="account-gate">
+        <div className="account-tabs" role="tablist" aria-label="D5e account">
+          <button role="tab" aria-selected={authMode === "login"} onClick={() => setAuthMode("login")}>Log In</button>
+          <button role="tab" aria-selected={authMode === "signup"} onClick={() => setAuthMode("signup")}>Create Account</button>
+        </div>
+        <div className="account-form">
+          <div><span className="eyebrow">{authMode === "login" ? "Welcome back" : "Save your partners"}</span><h2>{authMode === "login" ? "Log in to D5e" : "Create your D5e account"}</h2></div>
+          <label>Username<input autoComplete="username" value={authUsername} maxLength={24} onChange={(event) => setAuthUsername(event.target.value)} /></label>
+          <label>Password<input type="password" autoComplete={authMode === "login" ? "current-password" : "new-password"} value={authPassword} minLength={8} onChange={(event) => setAuthPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") submitAuth(); }} /></label>
+          <button className="primary-button" disabled={saving || !authUsername.trim() || !authPassword} onClick={submitAuth}>{saving ? "Please wait…" : authMode === "login" ? "Log In" : "Create Account"}</button>
+        </div>
+      </section> : <>
+      <div className="account-bar"><div><strong>{account.username}</strong><span>{account.limitUnlocked ? `${account.rootCount} Digimon · DM limit unlocked` : `${account.rootCount} / ${account.limit} Digimon`}</span></div><button onClick={logout}>Log Out</button></div>
+      {dmOverrideOpen && <section className="dm-override-panel"><div><span className="eyebrow">DM Override</span><h3>Unlock additional Digimon slots</h3><p>This permanently marks the account as DM-approved in Supabase.</p></div><label>DM Password<input type="password" value={dmPassword} onChange={(event) => setDmPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") unlockLimit(); }} /></label><div><button onClick={() => { setDmOverrideOpen(false); setDmPassword(""); }}>Cancel</button><button className="primary-button" disabled={saving || !dmPassword} onClick={unlockLimit}>Unlock Account</button></div></section>}
       {mode === "list" && <div className="creation-list">
         <div className="creation-list-heading"><div><span className="eyebrow">Your partners</span><h2>Saved Digimon</h2></div><button className="primary-button" onClick={() => { setEditingId(""); setForm(initialForm(props.stages, props.attributes, props.fields)); setMode("details"); }}>Create Digimon</button></div>
         {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel }) => {
@@ -703,6 +793,7 @@ export function CharacterCreation(props: {
           <div className="creator-actions"><button onClick={() => setMode("details")}>Back</button><button className="primary-button" disabled={saving || remaining < 0} onClick={saveDigimon}>{saving ? "Saving…" : "Save Digimon"}</button></div>
         </div>}
       </div>}
+      </>}
     </>}
   </section>;
 }

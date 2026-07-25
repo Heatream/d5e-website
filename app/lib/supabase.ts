@@ -16,6 +16,7 @@ export type AttachmentSkill = {
 
 export type TypeElement = { id: string; name: string; effect: string };
 export type PersonalitySkill = { id: string; name: string; personalities: string[]; description: string };
+export type Item = { id: number; name: string; type: string; description: string; slug: string; image: string | null };
 
 export type DigimonSkillRef = {
   raw: string;
@@ -41,6 +42,10 @@ export type SpecialSkill = {
   target: string;
   critical: string;
   digislotCost: string;
+  options?: Record<string, string>;
+  repeats?: Record<string, number>;
+  types?: string[];
+  stage?: SkillStage;
 };
 
 export type Digimon = {
@@ -113,6 +118,10 @@ type SkillRow = {
 };
 type TypeRow = { id: string; name: string | null; effect: string | null };
 type PersonalityRow = { id: string; name: string | null; personality: string | null; description: string | null };
+type ItemRow = {
+  id: number | string | null; name: string | null; type: string | null;
+  description: string | null; slug: string | null; image: string | null;
+};
 type DigimonRow = {
   id: number; name: string | null; slug: string | null; attribute: string | null; field: string | null;
   stage: string | null; image: string | null;
@@ -169,6 +178,14 @@ function commaList(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(commaList);
   if (typeof value !== "string") return [];
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+export function parseAttributeHistory(value: unknown) {
+  const history = commaList(value);
+  return {
+    history,
+    current: history.at(-1) ?? text(value),
+  };
 }
 
 export function normalizeAbility(value: unknown): string | null {
@@ -261,11 +278,22 @@ export async function getPersonalitySkills(): Promise<PersonalitySkill[]> {
 
 function specialSkill(value: Record<string, unknown> | null): SpecialSkill | null {
   if (!value || !cleanNullable(value.name)) return null;
+  const rawOptions = value.options && typeof value.options === "object" && !Array.isArray(value.options)
+    ? value.options as Record<string, unknown> : null;
+  const rawRepeats = value.repeats && typeof value.repeats === "object" && !Array.isArray(value.repeats)
+    ? value.repeats as Record<string, unknown> : null;
+  const options = rawOptions
+    ? Object.fromEntries(Object.entries(rawOptions).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : undefined;
+  const repeats = rawRepeats
+    ? Object.fromEntries(Object.entries(rawRepeats).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) : undefined;
+  const types = Array.isArray(value.types) ? value.types.filter((item): item is string => typeof item === "string") : undefined;
+  const stage = [1, 2, 3].includes(Number(value.stage)) ? Number(value.stage) as SkillStage : undefined;
   return {
     name: text(value.name), power: text(value.power ?? value.skill_power), time: text(value.time),
     duration: text(value.duration), hitType: text(value.hit_type), range: text(value.range),
     target: text(value.target), type: text(value.type, "-"), critical: text(value.critical),
     damage: text(value.damage), description: text(value.description, ""), digislotCost: text(value.digislot_cost),
+    options, repeats, types, stage,
   };
 }
 
@@ -283,18 +311,22 @@ export async function getMonsterManualData() {
     getSkills(), getTypeElements(), getPersonalitySkills(),
   ]);
 
-  const digimon: Digimon[] = digimonRows.filter((row) => row.name && row.slug).map((row) => ({
-    id: row.id, name: text(row.name, "Unnamed Digimon"), slug: text(row.slug, ""),
-    attribute: text(row.attribute), field: text(row.field), stage: text(row.stage, "Rookie"),
-    image: cleanNullable(row.image), strength: number(row.strength), dexterity: number(row.dexterity),
-    constitution: number(row.constitution), intelligence: number(row.intelligence),
-    wisdom: number(row.wisdom), charisma: number(row.charisma),
-    proficiencies: commaList(row.proficiencies), savingThrows: commaList(row.saving_throws),
-    weakness: commaList(row.weakness),
-    attachmentSkills: [row.attachment_skill_1, row.attachment_skill_2, row.attachment_skill_3, row.attachment_skill_4]
-      .map((reference, index) => parseAttachmentReference(reference, index + 1)),
-    personalitySkill: text(row["personality skill"], ""), specialSkills: specialSkills(row.special_skill),
-  }));
+  const digimon: Digimon[] = digimonRows.filter((row) => row.name && row.slug).map((row) => {
+    const { history: attributeHistory, current: currentAttribute } = parseAttributeHistory(row.attribute);
+
+    return {
+      id: row.id, name: text(row.name, "Unnamed Digimon"), slug: text(row.slug, ""),
+      attribute: currentAttribute, attributeHistory, field: text(row.field), stage: text(row.stage, "Rookie"),
+      image: cleanNullable(row.image), strength: number(row.strength), dexterity: number(row.dexterity),
+      constitution: number(row.constitution), intelligence: number(row.intelligence),
+      wisdom: number(row.wisdom), charisma: number(row.charisma),
+      proficiencies: commaList(row.proficiencies), savingThrows: commaList(row.saving_throws),
+      weakness: commaList(row.weakness),
+      attachmentSkills: [row.attachment_skill_1, row.attachment_skill_2, row.attachment_skill_3, row.attachment_skill_4]
+        .map((reference, index) => parseAttachmentReference(reference, index + 1)),
+      personalitySkill: text(row["personality skill"], ""), specialSkills: specialSkills(row.special_skill),
+    };
+  });
 
   const fields: Field[] = fieldRows.filter((row) => row.abbreviation).map((row) => ({
     id: row.id, name: text(row.name), abbreviation: text(row.abbreviation), symbol: text(row.symbol, ""), border: text(row.border, ""),
@@ -314,6 +346,18 @@ export async function getMonsterManualData() {
   }));
 
   return { digimon, fields, attributes, levels, skills, types, personalitySkills };
+}
+
+export async function getItems(): Promise<Item[]> {
+  const rows = await request<ItemRow[]>("Items", "select=*&order=id.asc");
+  return rows.filter((row) => row.name).map((row) => ({
+    id: number(row.id),
+    name: text(row.name, "Unnamed Item"),
+    type: text(row.type, "Item"),
+    description: text(row.description, "No description available."),
+    slug: text(row.slug, ""),
+    image: cleanNullable(row.image),
+  }));
 }
 
 export async function getCharacterCreationData() {

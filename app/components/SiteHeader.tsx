@@ -21,6 +21,9 @@ export function SiteHeader() {
           <Link className={`nav-link ${pathname.startsWith("/skills") ? "active" : ""}`} href="/skills" aria-current={pathname.startsWith("/skills") ? "page" : undefined}>
             Skills
           </Link>
+          <Link className={`nav-link ${pathname.startsWith("/items") ? "active" : ""}`} href="/items" aria-current={pathname.startsWith("/items") ? "page" : undefined}>
+            Items
+          </Link>
           <Link className={`nav-link ${pathname.startsWith("/character-creation") ? "active" : ""}`} href="/character-creation" aria-current={pathname.startsWith("/character-creation") ? "page" : undefined}>
             Character Creation
           </Link>
