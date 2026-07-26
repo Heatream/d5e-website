@@ -328,7 +328,7 @@ export function CharacterCreation(props: {
       const anchorLevel = Math.max(1, Math.min(20, Number(row.evolved_at_level ?? row.level ?? 1)));
       const parentConstitution = effectiveConstitution(parent);
       return calculateEvolvedHp(
-        hpFor(parent, anchorLevel, nextVisited), hitDieFor(row),
+        hpFor(parent, anchorLevel, nextVisited), hitDieFor(parent), hitDieFor(row),
         parentConstitution, constitution, anchorLevel, requestedLevel,
       );
     };

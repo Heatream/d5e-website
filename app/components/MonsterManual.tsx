@@ -6,7 +6,7 @@ import {
   formatPower, resolveSkillStage, skillStageValue, type AttachmentSkill, type Attribute,
   type Digimon, type Field, type LevelChart, type PersonalitySkill, type TypeElement,
 } from "../lib/supabase";
-import { calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
+import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
@@ -117,6 +117,10 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
     }));
     const stageName = normalizeStage(selected.stage);
     const hitDie = attribute?.hpDice[stageName === "7th stage" ? "mega" : stageName] ?? "1d6";
+    const historyDice = attributeBonuses.map((stageAttribute, index) => {
+      const historyStage = ["rookie", "champion", "ultimate", "mega"][index] ?? "mega";
+      return stageAttribute?.hpDice[historyStage] ?? "1d6";
+    });
     const attachmentSkills = selected.attachmentSkills
       .slice(0, Math.max(0, Math.min(4, levelRow?.attachmentSkill ?? 0)))
       .map((ref) => {
@@ -141,7 +145,9 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
     );
     return {
       attribute, field, levelRow, stats, hitDie,
-      hp: selected.hpByLevel?.[level] ?? calculateHp(hitDie, level, stats.constitution),
+      hp: selected.hpByLevel?.[level] ?? (historyDice.length > 1
+        ? calculateHistoryHp(historyDice, selected.stage, level, stats.constitution)
+        : calculateHp(hitDie, level, stats.constitution)),
       ac: (selected.baseAc ?? 10) + modifier(stats.dexterity),
       movement: calculateMovement(stats.dexterity),
       attachmentSkills, personality, skillName, personalitySkill,

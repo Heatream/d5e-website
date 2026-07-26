@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateEvolvedHp, calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
+import { calculateEvolvedHp, calculateHistoryHp, calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
 import { getCharacterCreationData, getItems, parseAttachmentReference, parseAttributeHistory, resolveSkillStage } from "../app/lib/supabase.ts";
 import { accountEmail, normalizeUsername, validateUsername } from "../app/lib/account-rules.ts";
 import { addMatchingDice } from "../app/lib/special-skill-rules.ts";
@@ -54,11 +54,18 @@ test("calculates progressive HP and movement", () => {
 
 test("stacks evolution HP, new dice, and Constitution changes", () => {
   const rookieAtFour = calculateHp("1d6", 4, 10);
-  const championAtFour = calculateEvolvedHp(rookieAtFour, "1d10", 10, 12, 4, 4);
-  assert.equal(championAtFour, rookieAtFour + 30 + 4);
-  assert.equal(calculateEvolvedHp(rookieAtFour, "1d10", 10, 12, 4, 6), championAtFour + 11 + 6);
-  const ultimateAtSix = calculateEvolvedHp(championAtFour + 11 + 6, "1d12", 12, 8, 6, 6);
-  assert.equal(ultimateAtSix, championAtFour + 17 + 36 - 12);
+  const championAtFour = calculateEvolvedHp(rookieAtFour, "1d6", "1d10", 10, 12, 4, 4);
+  assert.equal(championAtFour, rookieAtFour + 18 + 4);
+  assert.equal(calculateEvolvedHp(rookieAtFour, "1d6", "1d10", 10, 12, 4, 6), championAtFour + 11 + 6);
+  const ultimateAtSix = calculateEvolvedHp(championAtFour + 11 + 6, "1d10", "1d12", 12, 8, 6, 6);
+  assert.equal(ultimateAtSix, championAtFour + 17 + 30 - 12);
+});
+
+test("uses prior attribute dice across official Digimon stages", () => {
+  assert.equal(calculateHistoryHp(["1d8", "1d10"], "champion", 5, 10), 64);
+  assert.equal(calculateHistoryHp(["1d8", "1d10"], "champion", 6, 10), 69);
+  assert.equal(calculateHistoryHp(["1d6", "1d10", "1d16", "1d20"], "mega", 10, 18), 143);
+  assert.equal(calculateHistoryHp(["1d6", "1d10", "1d16", "1d20"], "mega", 15, 24), 296);
 });
 
 test("parses dotted attachment references and applies cumulative upgrades", () => {

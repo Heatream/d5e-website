@@ -18,20 +18,51 @@ export function calculateHp(die: string, level: number, constitution: number) {
 }
 export function calculateEvolvedHp(
   parentHpAtEvolution: number,
-  die: string,
+  previousDie: string,
+  currentDie: string,
   parentConstitution: number,
   constitution: number,
   evolvedAtLevel: number,
   requestedLevel: number,
 ) {
   const anchorLevel = Math.max(1, Math.min(20, evolvedAtLevel));
-  const size = dieSize(die);
-  let hp = parentHpAtEvolution + (3 * size)
+  const previousSize = dieSize(previousDie);
+  const currentSize = dieSize(currentDie);
+  let hp = parentHpAtEvolution + (3 * previousSize)
     + ((modifier(constitution) - modifier(parentConstitution)) * anchorLevel);
   for (let level = anchorLevel + 1; level <= requestedLevel; level += 1) {
-    hp += (level <= 5 ? size : size / 2) + modifier(constitution);
+    hp += (level <= 5 ? currentSize : currentSize / 2) + modifier(constitution);
   }
   return Math.max(1, hp);
+}
+
+const hpStageNames = ["rookie", "champion", "ultimate", "mega"] as const;
+const hpStageMinimums = [1, 5, 10, 15] as const;
+
+export function calculateHistoryHp(
+  diceByStage: string[],
+  stage: string,
+  level: number,
+  constitution: number,
+) {
+  const normalized = normalizeStage(stage) === "7th stage" ? "mega" : normalizeStage(stage);
+  const currentStageIndex = Math.max(0, hpStageNames.indexOf(normalized as typeof hpStageNames[number]));
+  const safeLevel = Math.max(1, Math.min(20, level));
+  const dieFor = (index: number) => diceByStage[index] || diceByStage.at(-1) || "1d6";
+
+  let hp = dieSize(dieFor(0)) * Math.min(safeLevel, 5);
+  for (let index = 1; index <= currentStageIndex; index += 1) {
+    const stageMinimum = hpStageMinimums[index];
+    if (safeLevel < stageMinimum) break;
+    hp += dieSize(dieFor(index - 1)) * 3;
+    // The next stage's transition level grants both the prior stage's final
+    // half-die increase and the three full prior-stage dice for Digivolution.
+    const finalStageLevel = index === hpStageNames.length - 1 ? 20 : hpStageMinimums[index + 1];
+    const levelsAfterEvolution = Math.max(0, Math.min(safeLevel, finalStageLevel) - stageMinimum);
+    hp += levelsAfterEvolution * (dieSize(dieFor(index)) / 2);
+  }
+
+  return Math.max(1, hp + modifier(constitution) * safeLevel);
 }
 export function calculateMovement(dexterity: number) {
   const raw = 30 + (modifier(dexterity) / 3) * 5;
