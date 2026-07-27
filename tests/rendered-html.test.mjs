@@ -36,23 +36,25 @@ test("supports multiple independently priced Special Skill effects", () => {
   assert.deepEqual(selectedChoiceKeys(choices), ["poison"]);
 });
 
-test("loads Agumon's Special Skill builder choices", async () => {
+test("loads readable Special Skills and character item catalogs", async () => {
   const data = await getCharacterCreationData();
   const babyFlame = data.digimon.find((digimon) => digimon.slug === "agumon")?.specialSkills[0];
-  assert.equal(babyFlame?.options?.dice_size, "1d6_dmg");
-  assert.equal(babyFlame?.options?.skill_power, "power_con");
-  assert.equal(babyFlame?.repeats?.add_dice, 1);
-  assert.equal(babyFlame?.repeats?.add_30ft, 1);
+  assert.equal(babyFlame?.damage, "2d6");
+  assert.equal(babyFlame?.power, "Constitution");
+  assert.equal(babyFlame?.range, "30ft");
   assert.deepEqual(babyFlame?.types, ["Fire"]);
-  assert.equal(addMatchingDice("1d6", babyFlame?.repeats?.add_dice ?? 0), "2d6");
   const veemonHead = data.digimon.find((digimon) => digimon.slug === "veemon")?.specialSkills[0];
   assert.equal(veemonHead?.digislotCost, "1");
   assert.deepEqual(veemonHead?.types, ["Null"]);
-  assert.deepEqual(veemonHead?.effects, ["Heal 1/4th of the damage deal, rounded up"]);
+  assert.equal(veemonHead?.effects?.includes("Heal 1/4th of the damage deal, rounded up"), true);
   assert.equal(veemonHead?.options, undefined);
-  assert.equal(data.items.length, 13);
-  assert.equal(data.items.every((item) => item.type.toLowerCase() === "held"), true);
-  assert.match(data.heldItemsTemplate ?? "", /(?:held_)?items\.(?:png|webp)$/);
+  assert.equal(data.items.filter((item) => item.type.toLowerCase() === "held").length, 13);
+  assert.equal(data.items.filter((item) => item.type.toLowerCase() === "enhancement").length, 7);
+  assert.equal(data.feats.length, 15);
+  assert.equal(data.feats.every((feat) => feat.types.some((type) => type.toLowerCase() === "digimon")), true);
+  assert.equal(data.fields.every((field) => /_feat\.png$/i.test(field.featBorder)), true);
+  assert.match(data.heldItemsTemplate ?? "", /held_item\.(?:png|webp)$/);
+  assert.match(data.enhancementItemsTemplate ?? "", /enhancement_item\.(?:png|webp)$/);
 });
 
 test("normalizes and validates account usernames", () => {

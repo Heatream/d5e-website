@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const { headers, session } = auth;
   const { url } = config();
   const response = await fetch(
-    `${url}/rest/v1/player_digimon?select=*,player_digimon_skills(*),player_digimon_items(slot_number,item_id)&order=created_at.desc`,
+    `${url}/rest/v1/player_digimon?select=*,player_digimon_skills(*),player_digimon_items(slot_number,item_id),player_digimon_feats(feat_id)&order=created_at.desc`,
     { headers, cache: "no-store" },
   );
   return sessionResponse(session, await response.json().catch(() => []), { status: response.status });

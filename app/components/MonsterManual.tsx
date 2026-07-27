@@ -4,7 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   formatPower, resolveSkillStage, skillStageValue, type AttachmentSkill, type Attribute,
-  type Digimon, type Field, type Item, type LevelChart, type PersonalitySkill, type TypeElement,
+  type Digimon, type Feat, type Field, type Item, type LevelChart, type PersonalitySkill, type TypeElement,
 } from "../lib/supabase";
 import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
 
@@ -44,7 +44,7 @@ function useAutoFitText(dependencies: unknown[]) {
       sheet.querySelectorAll<HTMLElement>("[data-fit]").forEach((element) => {
         element.style.removeProperty("font-size");
         const base = Number.parseFloat(getComputedStyle(element).fontSize);
-        const minimum = element.closest(".held-items-strip")
+        const minimum = element.closest(".held-items-strip, .enhancement-item-strip, .feat-strip")
           ? Math.max(3, base * 0.25)
           : Math.max(5, base * 0.45);
         const overflows = () => {
@@ -71,12 +71,14 @@ function useAutoFitText(dependencies: unknown[]) {
   return sheetRef;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, heldItems = [], heldItemsTemplate, onEdit, onDelete, onDigivolve, onDedigivolve, onManageItems }: {
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, heldItems = [], heldItemsTemplate, enhancementItem = null, enhancementItemsTemplate, feats = [], onEdit, onDelete, onDigivolve, onDedigivolve, onManageFeats, onManageItems }: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean;
   heldItems?: Array<Item | null>; heldItemsTemplate?: string | null;
-  onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void; onManageItems?: () => void;
+  enhancementItem?: Item | null; enhancementItemsTemplate?: string | null;
+  feats?: Feat[];
+  onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void; onManageFeats?: () => void; onManageItems?: () => void;
 }) {
   const [selectedSlug, setSelectedSlug] = useState(initialSelectedSlug);
   const [expandedSkillSlot, setExpandedSkillSlot] = useState<number | null>(null);
@@ -87,7 +89,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
   const [fieldFilter, setFieldFilter] = useState("");
   const [level, setLevel] = useState(initialLevel ?? 1);
   const selected = digimon.find((item) => item.slug === selectedSlug) ?? null;
-  const sheetRef = useAutoFitText([selectedSlug, level, expandedSkillSlot, expandedSpecialIndex, heldItems]);
+  const sheetRef = useAutoFitText([selectedSlug, level, expandedSkillSlot, expandedSpecialIndex, heldItems, enhancementItem, feats]);
   const stageOptions = useMemo(() => [...new Set(digimon.map((item) => item.stage).filter(Boolean))], [digimon]);
   const attributeOptions = useMemo(() => [...new Set(digimon.map((item) => item.attribute).filter(Boolean))], [digimon]);
   const fieldOptions = useMemo(() => [...new Set(digimon.map((item) => item.field).filter(Boolean))], [digimon]);
@@ -191,13 +193,14 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <div className="sheet-actions">
           {onDedigivolve && <button type="button" className="dedigivolution-button" onClick={onDedigivolve}>De-Digivolve</button>}
           {onDigivolve && <button type="button" className="digivolution-button" onClick={onDigivolve}>Digivolve</button>}
-          {onManageItems && <button type="button" className="held-items-button" onClick={onManageItems}>Held Items</button>}
+          {onManageFeats && <button type="button" className="feats-button" onClick={onManageFeats}>Feats</button>}
+          {onManageItems && <button type="button" className="held-items-button" onClick={onManageItems}>Items</button>}
           {!embedded && <Link className="edit-digimon-link" href={`/character-creation?template=${encodeURIComponent(selected.slug)}`}>Edit Digimon</Link>}
           {onEdit && <button type="button" className="edit-digimon-link" onClick={onEdit}>Edit</button>}
           {onDelete && <button type="button" className="delete-digimon-button" onClick={onDelete}>Delete</button>}
         </div>
       </div>
-      <div ref={sheetRef} className={`digimon-sheet-stack${heldItems.some(Boolean) ? " has-held-items" : ""}`}>
+      <div ref={sheetRef} className={`digimon-sheet-stack${feats.length || heldItems.some(Boolean) || enhancementItem ? " has-equipped-items" : ""}`}>
       <article className="digimon-sheet" aria-label={`${selected.name} level ${level} stat sheet`}>
         <DigimonPortrait className="sheet-portrait" src={selected.image} name={selected.name} />
         {view.field?.border && <img className="sheet-template" src={view.field.border} alt="" aria-hidden="true" />}
@@ -234,15 +237,37 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <div className="print-weaknesses" data-fit><p>{selected.weakness.length ? selected.weakness.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
         <div className="print-personality" data-fit><h3>{view.personality || "Personality"}{view.skillName ? ` · ${view.skillName}` : ""}</h3><p>{view.personalitySkill?.description ?? (view.skillName ? "Description unavailable." : "—")}</p></div>
       </article>
-      {heldItems.some(Boolean) && <div className="held-items-strip" data-count={heldItems.filter(Boolean).length} aria-label={`${selected.name} held items`}>
-        {heldItemsTemplate && <img className="held-items-template" src={heldItemsTemplate} alt="" aria-hidden="true" />}
-        <div className="held-items-content">
-          {heldItems.filter((item): item is Item => Boolean(item)).map((item, index) => <div className="held-item-slot" key={`${item.id}-${index}`}>
-            <span className="held-item-image">{item.image && <img src={item.image} alt="" />}</span>
-            <strong data-fit>{item.name}</strong>
-            <span data-fit>{item.description}</span>
+      {(feats.length > 0 || heldItems.some(Boolean) || enhancementItem) && <div className="sheet-extensions">
+        {feats.length > 0 && <div className="feat-strip" aria-label={`${selected.name} feats`}>
+          {feats.map((feat) => <div
+            className="feat-segment"
+            key={feat.id}
+            style={view.field?.featBorder ? { backgroundImage: `url("${view.field.featBorder}")` } : undefined}
+          >
+            <div className="feat-row">
+              <strong data-fit>{feat.name}</strong>
+              <span data-fit>{feat.description}</span>
+            </div>
           </div>)}
-        </div>
+        </div>}
+        {heldItems.some(Boolean) && <div className="held-items-strip" data-count={heldItems.filter(Boolean).length} aria-label={`${selected.name} held items`}>
+          {heldItemsTemplate && <img className="held-items-template" src={heldItemsTemplate} alt="" aria-hidden="true" />}
+          <div className="held-items-content">
+            {heldItems.filter((item): item is Item => Boolean(item)).map((item, index) => <div className="held-item-slot" key={`${item.id}-${index}`}>
+              <span className="held-item-image">{item.image && <img src={item.image} alt="" />}</span>
+              <strong data-fit>{item.name}</strong>
+              <span data-fit>{item.description}</span>
+            </div>)}
+          </div>
+        </div>}
+        {enhancementItem && <div className="enhancement-item-strip" aria-label={`${selected.name} enhancement item`}>
+          {enhancementItemsTemplate && <img className="enhancement-item-template" src={enhancementItemsTemplate} alt="" aria-hidden="true" />}
+          <div className="enhancement-item-content">
+            <span className="enhancement-item-image">{enhancementItem.image && <img src={enhancementItem.image} alt="" />}</span>
+            <strong data-fit>{enhancementItem.name}</strong>
+            <span data-fit>{enhancementItem.description}</span>
+          </div>
+        </div>}
       </div>}
       </div>
       {expandedSpecial && <section className="manual-skill-details special-skill-details" id={`manual-special-details-${selected.slug}`} aria-live="polite">

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MonsterManual } from "./MonsterManual";
 import type {
-  AttachmentSkill, Attribute, Digimon, DigimonStage, Field, Item, LevelChart, PersonalitySkill,
+  AttachmentSkill, Attribute, Digimon, DigimonStage, Feat, Field, Item, LevelChart, PersonalitySkill,
   SpecialSkill, SpecialSkillOption, TypeElement,
 } from "../lib/supabase";
 import { calculateEvolvedHp, calculateHp, modifier, normalizeStage } from "../lib/digimon-rules";
@@ -19,9 +19,11 @@ type SavedSkillRow = {
   attachment_stage?: number | null; personality_skill_id?: string | null; special_skill_choices?: Record<string, unknown> | null;
 };
 type SavedItemRow = { slot_number?: number; item_id?: number };
+type SavedFeatRow = { feat_id?: number };
 type SavedDigimonRow = Record<string, unknown> & {
   player_digimon_skills?: SavedSkillRow[];
   player_digimon_items?: SavedItemRow[];
+  player_digimon_feats?: SavedFeatRow[];
 };
 type SpecialDraft = {
   name: string; description: string; typeId: string; extraTypeIds: string[];
@@ -139,7 +141,7 @@ export function CharacterCreation(props: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   stages: DigimonStage[]; specialSkillOptions: SpecialSkillOption[];
-  items: Item[]; heldItemsTemplate: string | null;
+  items: Item[]; feats: Feat[]; heldItemsTemplate: string | null; enhancementItemsTemplate: string | null;
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"characters" | "digimon">("digimon");
@@ -157,7 +159,18 @@ export function CharacterCreation(props: {
   const [authPassword, setAuthPassword] = useState("");
   const [dmOverrideOpen, setDmOverrideOpen] = useState(false);
   const [dmPassword, setDmPassword] = useState("");
-  const [heldItemEditor, setHeldItemEditor] = useState<{ digimonId: string; name: string; itemIds: [string, string] } | null>(null);
+  const [heldItemEditor, setHeldItemEditor] = useState<{
+    digimonId: string; name: string; itemIds: [string, string]; enhancementItemId: string;
+  } | null>(null);
+  const [featEditor, setFeatEditor] = useState<{ digimonId: string; name: string; featIds: string[] } | null>(null);
+  const heldItemCatalog = useMemo(
+    () => props.items.filter((item) => item.type.trim().toLowerCase() === "held"),
+    [props.items],
+  );
+  const enhancementItemCatalog = useMemo(
+    () => props.items.filter((item) => item.type.trim().toLowerCase() === "enhancement"),
+    [props.items],
+  );
 
   const stage = props.stages.find((item) => item.id === form.stageId) ?? props.stages[0];
   const levelRow = props.levels.find((item) => item.level === form.level) ?? props.levels[0];
@@ -410,7 +423,10 @@ export function CharacterCreation(props: {
         parentConstitution, constitution, anchorLevel, requestedLevel,
       );
     };
-    return saved.map((row): { row: SavedDigimonRow; digimon: Digimon; level: number; heldItems: Array<Item | null> } => {
+    return saved.map((row): {
+      row: SavedDigimonRow; digimon: Digimon; level: number;
+      heldItems: Array<Item | null>; enhancementItem: Item | null; feats: Feat[];
+    } => {
     const savedStage = props.stages.find((item) => item.id === Number(row.stage_id));
     const savedAttributeIds = attributeIdsFor(row);
     const currentAttributeId = savedAttributeIds.at(-1) ?? String(row.attribute_id ?? "");
@@ -465,10 +481,18 @@ export function CharacterCreation(props: {
       const equipped = loadoutRows.find((item) => Number(item.slot_number) === slot);
       return props.items.find((item) => item.id === Number(equipped?.item_id)) ?? null;
     });
+    const enhancementRow = loadoutRows.find((item) => Number(item.slot_number) === 3);
+    const enhancementItem = props.items.find((item) => item.id === Number(enhancementRow?.item_id)) ?? null;
+    const featRows = rootRowFor(row).player_digimon_feats ?? [];
+    const feats = featRows
+      .map((equipped) => props.feats.find((feat) => feat.id === Number(equipped.feat_id)))
+      .filter((feat): feat is Feat => Boolean(feat));
     return {
       row,
       level: Number(row.level ?? savedStage?.minimumLevel ?? 1),
       heldItems,
+      enhancementItem,
+      feats,
       digimon: {
         id: -1, name: String(row.name ?? "Created Digimon"), slug: `saved-${String(row.id)}`,
         stage: savedStage?.name ?? "Rookie", attribute: savedAttribute?.name ?? "",
@@ -487,7 +511,7 @@ export function CharacterCreation(props: {
       },
     };
     });
-  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types, props.specialSkillOptions, props.items]);
+  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types, props.specialSkillOptions, props.items, props.feats]);
 
   async function saveHeldItems() {
     if (!heldItemEditor) return;
@@ -500,15 +524,41 @@ export function CharacterCreation(props: {
         body: JSON.stringify({
           digimonId: heldItemEditor.digimonId,
           itemIds: heldItemEditor.itemIds.map((id) => id ? Number(id) : null),
+          enhancementItemId: heldItemEditor.enhancementItemId ? Number(heldItemEditor.enhancementItemId) : null,
         }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Could not update held items.");
       await loadSavedDigimon();
-      setStatus(`${heldItemEditor.name}'s held items were updated.`);
+      setStatus(`${heldItemEditor.name}'s item loadout was updated.`);
       setHeldItemEditor(null);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not update held items.");
+      setStatus(error instanceof Error ? error.message : "Could not update items.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveFeats() {
+    if (!featEditor) return;
+    setSaving(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/player-digimon/feats", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          digimonId: featEditor.digimonId,
+          featIds: featEditor.featIds.map(Number),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not update feats.");
+      await loadSavedDigimon();
+      setStatus(`${featEditor.name}'s feats were updated.`);
+      setFeatEditor(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not update feats.");
     } finally {
       setSaving(false);
     }
@@ -840,15 +890,48 @@ export function CharacterCreation(props: {
       <div className="account-bar"><div><strong>{account.username}</strong><span>{account.limitUnlocked ? `${account.rootCount} Digimon · DM limit unlocked` : `${account.rootCount} / ${account.limit} Digimon`}</span></div><button onClick={logout}>Log Out</button></div>
       {heldItemEditor && <div className="held-items-dialog-backdrop">
         <section className="held-items-dialog" role="dialog" aria-modal="true" aria-labelledby="held-items-dialog-title" onKeyDown={(event) => { if (event.key === "Escape" && !saving) setHeldItemEditor(null); }}>
-          <div><span className="eyebrow">Shared loadout</span><h3 id="held-items-dialog-title">{heldItemEditor.name}&apos;s Held Items</h3><p>These items are shared by every form in this Digievolution chain.</p></div>
-          <div className="held-items-fields">{heldItemEditor.itemIds.map((itemId, index) => <label key={index}>Slot {index + 1}<select autoFocus={index === 0} value={itemId} onChange={(event) => setHeldItemEditor((current) => current ? { ...current, itemIds: current.itemIds.map((value, itemIndex) => itemIndex === index ? event.target.value : value) as [string, string] } : null)}><option value="">None</option>{props.items.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>)}</div>
+          <div><span className="eyebrow">Shared loadout</span><h3 id="held-items-dialog-title">{heldItemEditor.name}&apos;s Items</h3><p>These items are shared by every form in this Digievolution chain.</p></div>
+          <fieldset className="item-loadout-section">
+            <legend>Held Items</legend>
+            <div className="held-items-fields">{heldItemEditor.itemIds.map((itemId, index) => <label key={index}>Slot {index + 1}<select autoFocus={index === 0} value={itemId} onChange={(event) => setHeldItemEditor((current) => current ? { ...current, itemIds: current.itemIds.map((value, itemIndex) => itemIndex === index ? event.target.value : value) as [string, string] } : null)}><option value="">None</option>{heldItemCatalog.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>)}</div>
+          </fieldset>
+          <fieldset className="item-loadout-section enhancement-loadout-section">
+            <legend>Enhancement Item</legend>
+            <label>Enhancement<select value={heldItemEditor.enhancementItemId} onChange={(event) => setHeldItemEditor((current) => current ? { ...current, enhancementItemId: event.target.value } : null)}><option value="">None</option>{enhancementItemCatalog.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+            <p>One enhancement item may be equipped at a time.</p>
+          </fieldset>
           <div className="held-items-dialog-actions"><button type="button" onClick={() => setHeldItemEditor(null)} disabled={saving}>Cancel</button><button type="button" className="primary-button" onClick={saveHeldItems} disabled={saving}>{saving ? "Saving…" : "Save Items"}</button></div>
+        </section>
+      </div>}
+      {featEditor && <div className="held-items-dialog-backdrop">
+        <section className="held-items-dialog feats-dialog" role="dialog" aria-modal="true" aria-labelledby="feats-dialog-title" onKeyDown={(event) => { if (event.key === "Escape" && !saving) setFeatEditor(null); }}>
+          <div><span className="eyebrow">Shared progression</span><h3 id="feats-dialog-title">{featEditor.name}&apos;s Feats</h3><p>Select every feat this Digimon has. Feats are shared by every form in this Digievolution chain.</p></div>
+          <div className="feat-selection-list" role="group" aria-label="Available feats">
+            {props.feats.map((feat, index) => {
+              const selected = featEditor.featIds.includes(String(feat.id));
+              return <label className={`feat-selection-option${selected ? " selected" : ""}`} key={feat.id}>
+                <input
+                  type="checkbox"
+                  autoFocus={index === 0}
+                  checked={selected}
+                  onChange={() => setFeatEditor((current) => current ? {
+                    ...current,
+                    featIds: selected
+                      ? current.featIds.filter((id) => id !== String(feat.id))
+                      : [...current.featIds, String(feat.id)],
+                  } : null)}
+                />
+                <span className="feat-selection-copy"><strong>{feat.name}</strong><small>{feat.description}</small></span>
+              </label>;
+            })}
+          </div>
+          <div className="held-items-dialog-actions"><button type="button" onClick={() => setFeatEditor(null)} disabled={saving}>Cancel</button><button type="button" className="primary-button" onClick={saveFeats} disabled={saving}>{saving ? "Saving…" : "Save Feats"}</button></div>
         </section>
       </div>}
       {dmOverrideOpen && <section className="dm-override-panel"><div><span className="eyebrow">DM Override</span><h3>Unlock additional Digimon slots</h3><p>This permanently marks the account as DM-approved in Supabase.</p></div><label>DM Password<input type="password" value={dmPassword} onChange={(event) => setDmPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") unlockLimit(); }} /></label><div><button onClick={() => { setDmOverrideOpen(false); setDmPassword(""); }}>Cancel</button><button className="primary-button" disabled={saving || !dmPassword} onClick={unlockLimit}>Unlock Account</button></div></section>}
       {mode === "list" && <div className="creation-list">
         <div className="creation-list-heading"><div><span className="eyebrow">Your partners</span><h2>Saved Digimon</h2></div><button className="primary-button" onClick={() => { setEditingId(""); setForm(initialForm(props.stages, props.attributes, props.fields)); setMode("details"); }}>Create Digimon</button></div>
-        {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel, heldItems }) => {
+        {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel, heldItems, enhancementItem, feats }) => {
           const rowId = String(row.id);
           const open = selectedSavedId === rowId;
           const savedStageIndex = props.stages.findIndex((item) => item.name.toLowerCase() === savedEntry.stage.toLowerCase());
@@ -861,7 +944,19 @@ export function CharacterCreation(props: {
               onDigivolve={savedStageIndex >= 0 && savedStageIndex < props.stages.length - 1 ? () => digivolveSavedDigimon(row) : undefined}
               onDedigivolve={savedEntry.parentId ? () => dedigivolveSavedDigimon(row) : undefined}
               heldItems={heldItems} heldItemsTemplate={props.heldItemsTemplate}
-              onManageItems={() => setHeldItemEditor({ digimonId: rowId, name: savedEntry.name, itemIds: [heldItems[0]?.id ? String(heldItems[0].id) : "", heldItems[1]?.id ? String(heldItems[1].id) : ""] })}
+              enhancementItem={enhancementItem} enhancementItemsTemplate={props.enhancementItemsTemplate}
+              feats={feats}
+              onManageFeats={() => setFeatEditor({
+                digimonId: rowId,
+                name: savedEntry.name,
+                featIds: feats.map((feat) => String(feat.id)),
+              })}
+              onManageItems={() => setHeldItemEditor({
+                digimonId: rowId,
+                name: savedEntry.name,
+                itemIds: [heldItems[0]?.id ? String(heldItems[0].id) : "", heldItems[1]?.id ? String(heldItems[1].id) : ""],
+                enhancementItemId: enhancementItem?.id ? String(enhancementItem.id) : "",
+              })}
               onEdit={() => editSavedDigimon(row)} onDelete={() => deleteSavedDigimon(rowId, savedEntry.name)} />}
           </article>;
         })}</div>

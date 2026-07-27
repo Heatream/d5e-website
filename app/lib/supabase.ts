@@ -17,6 +17,7 @@ export type AttachmentSkill = {
 export type TypeElement = { id: string; name: string; effect: string };
 export type PersonalitySkill = { id: string; name: string; personalities: string[]; description: string };
 export type Item = { id: number; name: string; type: string; description: string; slug: string; image: string | null };
+export type Feat = { id: number; name: string; types: string[]; description: string };
 
 export type DigimonSkillRef = {
   raw: string;
@@ -76,7 +77,7 @@ export type Digimon = {
   evolvedAtLevel?: number | null;
 };
 
-export type Field = { id: number; name: string; abbreviation: string; symbol: string; border: string };
+export type Field = { id: number; name: string; abbreviation: string; symbol: string; border: string; featBorder: string };
 export type Attribute = { id: string; name: string; statBuffs: string[]; hpDice: Record<string, string>; image: string };
 export type LevelChart = {
   level: number;
@@ -134,7 +135,8 @@ type DigimonRow = {
   attachment_skill_3: string | null; attachment_skill_4: string | null;
   special_skill: Record<string, unknown> | Record<string, unknown>[] | null; "personality skill": string | null;
 };
-type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null };
+type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null; feat_border: string | null };
+type FeatRow = { id: number | string | null; name: string | null; type: string | null; description: string | null };
 type AttributeRow = {
   id: string; name: string | null; "+2 stat buff": string | null; "hp dice rookie": string | null;
   "hp dice champion": string | null; "hp dice ultimate": string | null; "hp dice mega": string | null; image: string | null;
@@ -343,7 +345,8 @@ export async function getMonsterManualData() {
   });
 
   const fields: Field[] = fieldRows.filter((row) => row.abbreviation).map((row) => ({
-    id: row.id, name: text(row.name), abbreviation: text(row.abbreviation), symbol: text(row.symbol, ""), border: text(row.border, ""),
+    id: row.id, name: text(row.name), abbreviation: text(row.abbreviation), symbol: text(row.symbol, ""),
+    border: text(row.border, ""), featBorder: text(row.feat_border, ""),
   }));
   const attributes: Attribute[] = attributeRows.filter((row) => row.name).map((row) => ({
     id: row.id, name: text(row.name), statBuffs: commaList(row["+2 stat buff"]),
@@ -374,13 +377,26 @@ export async function getItems(): Promise<Item[]> {
   }));
 }
 
+export async function getFeats(): Promise<Feat[]> {
+  const rows = await request<FeatRow[]>("Feats", "select=*&order=id.asc");
+  return rows
+    .filter((row) => row.name && commaList(row.type).some((type) => type.toLowerCase() === "digimon"))
+    .map((row) => ({
+      id: number(row.id),
+      name: text(row.name, "Unnamed Feat"),
+      types: commaList(row.type),
+      description: text(row.description, "No description available."),
+    }));
+}
+
 export async function getCharacterCreationData() {
-  const [manual, stageRows, specialRows, items, heldItemAssets] = await Promise.all([
+  const [manual, stageRows, specialRows, items, feats, itemAssets] = await Promise.all([
     getMonsterManualData(),
     request<DigimonStageRow[]>("Digimon Stage", "select=*&order=id.asc"),
     request<SpecialSkillOptionRow[]>("Special Skill Table", "select=*&order=id.asc"),
     getItems(),
-    request<AssetRow[]>("Asssets", "select=name,image&name=eq.held_items_border&limit=1"),
+    getFeats(),
+    request<AssetRow[]>("Asssets", "select=name,image&name=in.(held_items_border,enhancement_items_border)"),
   ]);
   const stages: DigimonStage[] = stageRows.filter((row) => row.name && row.slug).map((row) => ({
     id: row.id,
@@ -408,8 +424,10 @@ export async function getCharacterCreationData() {
     ...manual,
     stages,
     specialSkillOptions,
-    items: items.filter((item) => item.type.trim().toLowerCase() === "held"),
-    heldItemsTemplate: cleanNullable(heldItemAssets[0]?.image),
+    feats,
+    items: items.filter((item) => ["held", "enhancement"].includes(item.type.trim().toLowerCase())),
+    heldItemsTemplate: cleanNullable(itemAssets.find((asset) => asset.name === "held_items_border")?.image),
+    enhancementItemsTemplate: cleanNullable(itemAssets.find((asset) => asset.name === "enhancement_items_border")?.image),
   };
 }
 
