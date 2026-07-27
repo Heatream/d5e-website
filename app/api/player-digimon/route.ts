@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const { headers, session } = auth;
   const { url } = config();
   const response = await fetch(
-    `${url}/rest/v1/player_digimon?select=*,player_digimon_skills(*)&order=created_at.desc`,
+    `${url}/rest/v1/player_digimon?select=*,player_digimon_skills(*),player_digimon_items(slot_number,item_id)&order=created_at.desc`,
     { headers, cache: "no-store" },
   );
   return sessionResponse(session, await response.json().catch(() => []), { status: response.status });
@@ -44,7 +44,10 @@ export async function POST(request: NextRequest) {
   const { url } = config();
   const body = await request.json().catch(() => null) as { digimon?: Record<string, unknown>; skills?: Record<string, unknown>[] } | null;
   if (!body?.digimon || !Array.isArray(body.skills)) return NextResponse.json({ error: "Invalid Digimon data." }, { status: 400 });
-  const digimon = { ...body.digimon, user_id: session.user.id };
+  const digimon: Record<string, unknown> & { user_id: string; parent_digimon_id?: unknown } = {
+    ...body.digimon,
+    user_id: session.user.id,
+  };
   const invalidParent = await validateParent(url, headers, digimon.parent_digimon_id);
   if (invalidParent) return invalidParent;
 
@@ -83,7 +86,10 @@ export async function PATCH(request: NextRequest) {
   const { url } = config();
   const body = await request.json().catch(() => null) as { id?: string; digimon?: Record<string, unknown>; skills?: Record<string, unknown>[] } | null;
   if (!body?.id || !body.digimon || !Array.isArray(body.skills)) return NextResponse.json({ error: "Invalid Digimon data." }, { status: 400 });
-  const digimon = { ...body.digimon, user_id: session.user.id };
+  const digimon: Record<string, unknown> & { user_id: string; parent_digimon_id?: unknown } = {
+    ...body.digimon,
+    user_id: session.user.id,
+  };
   const invalidParent = await validateParent(url, headers, digimon.parent_digimon_id);
   if (invalidParent) return invalidParent;
 

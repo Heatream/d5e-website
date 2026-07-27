@@ -4,21 +4,28 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MonsterManual } from "./MonsterManual";
 import type {
-  AttachmentSkill, Attribute, Digimon, DigimonStage, Field, LevelChart, PersonalitySkill,
+  AttachmentSkill, Attribute, Digimon, DigimonStage, Field, Item, LevelChart, PersonalitySkill,
   SpecialSkill, SpecialSkillOption, TypeElement,
 } from "../lib/supabase";
 import { calculateEvolvedHp, calculateHp, modifier, normalizeStage } from "../lib/digimon-rules";
-import { addMatchingDice } from "../lib/special-skill-rules";
+import {
+  addMatchingDice, resolveStoredSpecialDamage, selectedChoiceKeys, toggleMultiChoice,
+  type SpecialChoices,
+} from "../lib/special-skill-rules";
 
 type Account = { username: string; rootCount: number; limit: number; limitUnlocked: boolean };
 type SavedSkillRow = {
   skill_kind?: string; slot_number?: number; attachment_skill_id?: string | null; element_id?: string | null;
   attachment_stage?: number | null; personality_skill_id?: string | null; special_skill_choices?: Record<string, unknown> | null;
 };
-type SavedDigimonRow = Record<string, unknown> & { player_digimon_skills?: SavedSkillRow[] };
+type SavedItemRow = { slot_number?: number; item_id?: number };
+type SavedDigimonRow = Record<string, unknown> & {
+  player_digimon_skills?: SavedSkillRow[];
+  player_digimon_items?: SavedItemRow[];
+};
 type SpecialDraft = {
   name: string; description: string; typeId: string; extraTypeIds: string[];
-  stage: 1 | 2 | 3; choices: Record<string, string>; repeatCounts: Record<string, number>;
+  stage: 1 | 2 | 3; choices: SpecialChoices; repeatCounts: Record<string, number>;
 };
 type FormState = {
   name: string; speciesName: string; stageId: number; level: number; attributeId: string; stageAttributeIds: string[]; fieldId: number;
@@ -27,7 +34,7 @@ type FormState = {
   proficiencies: string[]; savingThrows: string[]; weaknesses: string[]; personality: string; personalitySkillId: string; image: string;
   attachments: Array<{ skillId: string; elementId: string; powerOverride: string; stage: 1 | 2 | 3 }>;
   specialName: string; specialDescription: string; specialTypeId: string; specialExtraTypeIds: string[];
-  specialStage: 1 | 2 | 3; specialChoices: Record<string, string>; repeatCounts: Record<string, number>;
+  specialStage: 1 | 2 | 3; specialChoices: SpecialChoices; repeatCounts: Record<string, number>;
   specialTwo: SpecialDraft;
 };
 
@@ -82,6 +89,7 @@ export function CharacterCreation(props: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   stages: DigimonStage[]; specialSkillOptions: SpecialSkillOption[];
+  items: Item[]; heldItemsTemplate: string | null;
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"characters" | "digimon">("digimon");
@@ -99,6 +107,7 @@ export function CharacterCreation(props: {
   const [authPassword, setAuthPassword] = useState("");
   const [dmOverrideOpen, setDmOverrideOpen] = useState(false);
   const [dmPassword, setDmPassword] = useState("");
+  const [heldItemEditor, setHeldItemEditor] = useState<{ digimonId: string; name: string; itemIds: [string, string] } | null>(null);
 
   const stage = props.stages.find((item) => item.id === form.stageId) ?? props.stages[0];
   const levelRow = props.levels.find((item) => item.level === form.level) ?? props.levels[0];
@@ -241,11 +250,11 @@ export function CharacterCreation(props: {
     } finally { setSaving(false); }
   }
 
-  const selectedOptions = useMemo(() => Object.entries(form.specialChoices)
-    .map(([, key]) => props.specialSkillOptions.find((option) => option.key === key))
+  const selectedOptions = useMemo(() => selectedChoiceKeys(form.specialChoices)
+    .map((key) => props.specialSkillOptions.find((option) => option.key === key))
     .filter((option): option is SpecialSkillOption => Boolean(option)), [form.specialChoices, props.specialSkillOptions]);
   const repeatedOptions = props.specialSkillOptions.filter((option) => (form.repeatCounts[option.key] ?? 0) > 0);
-  const secondSelectedOptions = useMemo(() => Object.values(form.specialTwo.choices)
+  const secondSelectedOptions = useMemo(() => selectedChoiceKeys(form.specialTwo.choices)
     .map((key) => props.specialSkillOptions.find((option) => option.key === key))
     .filter((option): option is SpecialSkillOption => Boolean(option)), [form.specialTwo.choices, props.specialSkillOptions]);
   const secondRepeatedOptions = props.specialSkillOptions.filter((option) => (form.specialTwo.repeatCounts[option.key] ?? 0) > 0);
@@ -303,6 +312,19 @@ export function CharacterCreation(props: {
 
   const savedDigimon = useMemo(() => {
     const rowsById = new Map(saved.map((row) => [String(row.id), row]));
+    const rootRowFor = (row: SavedDigimonRow) => {
+      let current = row;
+      const visited = new Set<string>();
+      while (current.parent_digimon_id) {
+        const id = String(current.id);
+        if (visited.has(id)) break;
+        visited.add(id);
+        const parent = rowsById.get(String(current.parent_digimon_id));
+        if (!parent) break;
+        current = parent;
+      }
+      return current;
+    };
     const attributeIdsFor = (row: SavedDigimonRow) => {
       const history = Array.isArray(row.stage_attribute_ids) ? row.stage_attribute_ids.map(String).filter(Boolean) : [];
       return history.length ? history : row.attribute_id ? [String(row.attribute_id)] : [];
@@ -332,7 +354,7 @@ export function CharacterCreation(props: {
         parentConstitution, constitution, anchorLevel, requestedLevel,
       );
     };
-    return saved.map((row): { row: SavedDigimonRow; digimon: Digimon; level: number } => {
+    return saved.map((row): { row: SavedDigimonRow; digimon: Digimon; level: number; heldItems: Array<Item | null> } => {
     const savedStage = props.stages.find((item) => item.id === Number(row.stage_id));
     const savedAttributeIds = attributeIdsFor(row);
     const currentAttributeId = savedAttributeIds.at(-1) ?? String(row.attribute_id ?? "");
@@ -360,13 +382,37 @@ export function CharacterCreation(props: {
     const rawSpecials = Array.isArray(row.special_skill)
       ? row.special_skill.filter((item): item is SpecialSkill => Boolean(item && typeof item === "object"))
       : row.special_skill && typeof row.special_skill === "object" ? [row.special_skill as SpecialSkill] : [];
+    const specialRows = skillRows.filter((item) => item.skill_kind === "special")
+      .sort((left, right) => Number(left.slot_number ?? 1) - Number(right.slot_number ?? 1));
+    const normalizedSpecials = rawSpecials.map((special, index) => {
+      const choices = specialRows[index]?.special_skill_choices;
+      const options = choices?.options && typeof choices.options === "object" && !Array.isArray(choices.options)
+        ? choices.options as Record<string, unknown> : {};
+      const repeats = choices?.repeats && typeof choices.repeats === "object" && !Array.isArray(choices.repeats)
+        ? choices.repeats as Record<string, unknown> : {};
+      return {
+        ...special,
+        damage: resolveStoredSpecialDamage(
+          special.damage,
+          options.dice_size,
+          repeats.add_dice,
+          props.specialSkillOptions.filter((option) => option.category === "dice_size"),
+        ),
+      };
+    });
     const hpByLevel = Object.fromEntries(Array.from({ length: 20 }, (_, index) => {
       const requestedLevel = index + 1;
       return [requestedLevel, hpFor(row, requestedLevel)];
     }));
+    const loadoutRows = rootRowFor(row).player_digimon_items ?? [];
+    const heldItems: Array<Item | null> = [1, 2].map((slot) => {
+      const equipped = loadoutRows.find((item) => Number(item.slot_number) === slot);
+      return props.items.find((item) => item.id === Number(equipped?.item_id)) ?? null;
+    });
     return {
       row,
       level: Number(row.level ?? savedStage?.minimumLevel ?? 1),
+      heldItems,
       digimon: {
         id: -1, name: String(row.name ?? "Created Digimon"), slug: `saved-${String(row.id)}`,
         stage: savedStage?.name ?? "Rookie", attribute: savedAttribute?.name ?? "",
@@ -379,13 +425,38 @@ export function CharacterCreation(props: {
         savingThrows: String(row.saving_throws ?? "").split(",").map((item) => item.trim()).filter(Boolean),
         weakness: String(row.weaknesses ?? "").split(",").map((item) => item.trim()).filter(Boolean),
         personalitySkill: String(row.personality_skill ?? ""), attachmentSkills,
-        specialSkills: rawSpecials, hpByLevel, baseAc: savedStage?.baseAc ?? 10,
+        specialSkills: normalizedSpecials, hpByLevel, baseAc: savedStage?.baseAc ?? 10,
         parentId: row.parent_digimon_id ? String(row.parent_digimon_id) : null,
         evolvedAtLevel: row.evolved_at_level ? Number(row.evolved_at_level) : null,
       },
     };
     });
-  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types]);
+  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types, props.specialSkillOptions, props.items]);
+
+  async function saveHeldItems() {
+    if (!heldItemEditor) return;
+    setSaving(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/player-digimon/items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          digimonId: heldItemEditor.digimonId,
+          itemIds: heldItemEditor.itemIds.map((id) => id ? Number(id) : null),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Could not update held items.");
+      await loadSavedDigimon();
+      setStatus(`${heldItemEditor.name}'s held items were updated.`);
+      setHeldItemEditor(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not update held items.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function chooseStage(id: number) {
     const next = props.stages.find((item) => item.id === id);
@@ -470,13 +541,13 @@ export function CharacterCreation(props: {
       specialName: String(resolved.name ?? ""), specialDescription: String(resolved.description ?? ""),
       specialTypeId: typeIds[0] ?? "", specialExtraTypeIds: typeIds.slice(1),
       specialStage: Math.max(1, Math.min(3, Number(choices.stage ?? 1))) as 1 | 2 | 3,
-      specialChoices: choices.options && typeof choices.options === "object" ? choices.options as Record<string, string> : {},
+      specialChoices: choices.options && typeof choices.options === "object" ? choices.options as SpecialChoices : {},
       repeatCounts: choices.repeats && typeof choices.repeats === "object" ? choices.repeats as Record<string, number> : {},
       specialTwo: {
         name: String(resolvedTwo.name ?? ""), description: String(resolvedTwo.description ?? ""),
         typeId: typeIdsTwo[0] ?? "", extraTypeIds: typeIdsTwo.slice(1),
         stage: Math.max(1, Math.min(3, Number(choicesTwo.stage ?? 1))) as 1 | 2 | 3,
-        choices: choicesTwo.options && typeof choicesTwo.options === "object" ? choicesTwo.options as Record<string, string> : {},
+        choices: choicesTwo.options && typeof choicesTwo.options === "object" ? choicesTwo.options as SpecialChoices : {},
         repeatCounts: choicesTwo.repeats && typeof choicesTwo.repeats === "object" ? choicesTwo.repeats as Record<string, number> : {},
       },
     });
@@ -705,10 +776,17 @@ export function CharacterCreation(props: {
         </div>
       </section> : <>
       <div className="account-bar"><div><strong>{account.username}</strong><span>{account.limitUnlocked ? `${account.rootCount} Digimon · DM limit unlocked` : `${account.rootCount} / ${account.limit} Digimon`}</span></div><button onClick={logout}>Log Out</button></div>
+      {heldItemEditor && <div className="held-items-dialog-backdrop">
+        <section className="held-items-dialog" role="dialog" aria-modal="true" aria-labelledby="held-items-dialog-title" onKeyDown={(event) => { if (event.key === "Escape" && !saving) setHeldItemEditor(null); }}>
+          <div><span className="eyebrow">Shared loadout</span><h3 id="held-items-dialog-title">{heldItemEditor.name}&apos;s Held Items</h3><p>These items are shared by every form in this Digievolution chain.</p></div>
+          <div className="held-items-fields">{heldItemEditor.itemIds.map((itemId, index) => <label key={index}>Slot {index + 1}<select autoFocus={index === 0} value={itemId} onChange={(event) => setHeldItemEditor((current) => current ? { ...current, itemIds: current.itemIds.map((value, itemIndex) => itemIndex === index ? event.target.value : value) as [string, string] } : null)}><option value="">None</option>{props.items.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>)}</div>
+          <div className="held-items-dialog-actions"><button type="button" onClick={() => setHeldItemEditor(null)} disabled={saving}>Cancel</button><button type="button" className="primary-button" onClick={saveHeldItems} disabled={saving}>{saving ? "Saving…" : "Save Items"}</button></div>
+        </section>
+      </div>}
       {dmOverrideOpen && <section className="dm-override-panel"><div><span className="eyebrow">DM Override</span><h3>Unlock additional Digimon slots</h3><p>This permanently marks the account as DM-approved in Supabase.</p></div><label>DM Password<input type="password" value={dmPassword} onChange={(event) => setDmPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") unlockLimit(); }} /></label><div><button onClick={() => { setDmOverrideOpen(false); setDmPassword(""); }}>Cancel</button><button className="primary-button" disabled={saving || !dmPassword} onClick={unlockLimit}>Unlock Account</button></div></section>}
       {mode === "list" && <div className="creation-list">
         <div className="creation-list-heading"><div><span className="eyebrow">Your partners</span><h2>Saved Digimon</h2></div><button className="primary-button" onClick={() => { setEditingId(""); setForm(initialForm(props.stages, props.attributes, props.fields)); setMode("details"); }}>Create Digimon</button></div>
-        {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel }) => {
+        {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel, heldItems }) => {
           const rowId = String(row.id);
           const open = selectedSavedId === rowId;
           const savedStageIndex = props.stages.findIndex((item) => item.name.toLowerCase() === savedEntry.stage.toLowerCase());
@@ -720,6 +798,8 @@ export function CharacterCreation(props: {
             {open && <MonsterManual {...props} digimon={[savedEntry]} initialSelectedSlug={savedEntry.slug} initialLevel={savedLevel} levelBounds={[minimumLevel, 20]} embedded
               onDigivolve={savedStageIndex >= 0 && savedStageIndex < props.stages.length - 1 ? () => digivolveSavedDigimon(row) : undefined}
               onDedigivolve={savedEntry.parentId ? () => dedigivolveSavedDigimon(row) : undefined}
+              heldItems={heldItems} heldItemsTemplate={props.heldItemsTemplate}
+              onManageItems={() => setHeldItemEditor({ digimonId: rowId, name: savedEntry.name, itemIds: [heldItems[0]?.id ? String(heldItems[0].id) : "", heldItems[1]?.id ? String(heldItems[1].id) : ""] })}
               onEdit={() => editSavedDigimon(row)} onDelete={() => deleteSavedDigimon(rowId, savedEntry.name)} />}
           </article>;
         })}</div>
@@ -775,7 +855,18 @@ export function CharacterCreation(props: {
             {specialAllowsType && Array.from({ length: extraTypingCount }, (_, index) => <label key={index}>Extra Element {index + 1}<select value={form.specialExtraTypeIds[index] ?? ""} onChange={(event) => setForm((current) => ({ ...current, specialExtraTypeIds: Array.from({ length: extraTypingCount }, (_, itemIndex) => itemIndex === index ? event.target.value : current.specialExtraTypeIds[itemIndex] ?? "") }))}><option value="">Choose element</option>{props.types.filter((item) => item.id !== form.specialTypeId).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>)}
             <label className="wide">Description<textarea value={form.specialDescription} onChange={(event) => setForm({ ...form, specialDescription: event.target.value })} /></label>
           </div>
-          <div className="special-option-grid">{orderedSpecialGroups.map(([category, options]) => <fieldset key={category} data-category={category}><legend>{categoryLabels[category] ?? category}</legend>{options.filter((option) => !option.repeatable).map((option) => <label className="option-choice" key={option.id}><input type="radio" name={category} checked={form.specialChoices[category] === option.key} onChange={() => setForm((current) => ({ ...current, specialChoices: { ...current.specialChoices, [category]: option.key } }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>)}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, repeatCounts: { ...current.repeatCounts, [option.key]: Number(event.target.value) } }))} /></label>)}</fieldset>)}</div>
+          <div className="special-option-grid">{orderedSpecialGroups.map(([category, options]) => <fieldset key={category} data-category={category}><legend>{categoryLabels[category] ?? category}</legend>{options.filter((option) => !option.repeatable).map((option) => {
+            const multiple = category === "effect";
+            const checked = multiple
+              ? (Array.isArray(form.specialChoices[category]) ? form.specialChoices[category] : []).includes(option.key)
+              : form.specialChoices[category] === option.key;
+            return <label className="option-choice" key={option.id}><input type={multiple ? "checkbox" : "radio"} name={category} checked={checked} onChange={() => setForm((current) => ({
+              ...current,
+              specialChoices: multiple
+                ? toggleMultiChoice(current.specialChoices, category, option.key)
+                : { ...current.specialChoices, [category]: option.key },
+            }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>;
+          })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, repeatCounts: { ...current.repeatCounts, [option.key]: Number(event.target.value) } }))} /></label>)}</fieldset>)}</div>
           {stage?.specialSkillAmount === 2 && <section className="second-special-editor" aria-labelledby="second-special-title">
             <h3 id="second-special-title">Special Skill 2</h3>
             <div className="form-grid special-heading-grid">
@@ -788,7 +879,21 @@ export function CharacterCreation(props: {
               })}><option value="">Choose element</option>{props.types.filter((item) => item.id !== form.specialTwo.typeId).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>)}
               <label className="wide">Description<textarea value={form.specialTwo.description} onChange={(event) => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, description: event.target.value } }))} /></label>
             </div>
-            <div className="special-option-grid">{orderedSecondSpecialGroups.map(([category, options]) => <fieldset key={category} data-category={category}><legend>{categoryLabels[category] ?? category}</legend>{options.filter((option) => !option.repeatable).map((option) => <label className="option-choice" key={option.id}><input type="radio" name={`second-${category}`} checked={form.specialTwo.choices[category] === option.key} onChange={() => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, choices: { ...current.specialTwo.choices, [category]: option.key } } }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>)}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.specialTwo.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, repeatCounts: { ...current.specialTwo.repeatCounts, [option.key]: Number(event.target.value) } } }))} /></label>)}</fieldset>)}</div>
+            <div className="special-option-grid">{orderedSecondSpecialGroups.map(([category, options]) => <fieldset key={category} data-category={category}><legend>{categoryLabels[category] ?? category}</legend>{options.filter((option) => !option.repeatable).map((option) => {
+              const multiple = category === "effect";
+              const checked = multiple
+                ? (Array.isArray(form.specialTwo.choices[category]) ? form.specialTwo.choices[category] : []).includes(option.key)
+                : form.specialTwo.choices[category] === option.key;
+              return <label className="option-choice" key={option.id}><input type={multiple ? "checkbox" : "radio"} name={`second-${category}`} checked={checked} onChange={() => setForm((current) => ({
+                ...current,
+                specialTwo: {
+                  ...current.specialTwo,
+                  choices: multiple
+                    ? toggleMultiChoice(current.specialTwo.choices, category, option.key)
+                    : { ...current.specialTwo.choices, [category]: option.key },
+                },
+              }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>;
+            })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.specialTwo.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, repeatCounts: { ...current.specialTwo.repeatCounts, [option.key]: Number(event.target.value) } } }))} /></label>)}</fieldset>)}</div>
           </section>}
           <div className="creator-actions"><button onClick={() => setMode("details")}>Back</button><button className="primary-button" disabled={saving || remaining < 0} onClick={saveDigimon}>{saving ? "Saving…" : "Save Digimon"}</button></div>
         </div>}

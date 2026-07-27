@@ -42,7 +42,7 @@ export type SpecialSkill = {
   target: string;
   critical: string;
   digislotCost: string;
-  options?: Record<string, string>;
+  options?: Record<string, string | string[]>;
   repeats?: Record<string, number>;
   types?: string[];
   stage?: SkillStage;
@@ -122,6 +122,7 @@ type ItemRow = {
   id: number | string | null; name: string | null; type: string | null;
   description: string | null; slug: string | null; image: string | null;
 };
+type AssetRow = { name: string | null; image: string | null };
 type DigimonRow = {
   id: number; name: string | null; slug: string | null; attribute: string | null; field: string | null;
   stage: string | null; image: string | null;
@@ -283,7 +284,14 @@ function specialSkill(value: Record<string, unknown> | null): SpecialSkill | nul
   const rawRepeats = value.repeats && typeof value.repeats === "object" && !Array.isArray(value.repeats)
     ? value.repeats as Record<string, unknown> : null;
   const options = rawOptions
-    ? Object.fromEntries(Object.entries(rawOptions).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : undefined;
+    ? Object.entries(rawOptions).reduce<Record<string, string | string[]>>((result, [key, option]) => {
+      if (typeof option === "string") result[key] = option;
+      if (Array.isArray(option)) {
+        const values = option.filter((item): item is string => typeof item === "string");
+        if (values.length) result[key] = values;
+      }
+      return result;
+    }, {}) : undefined;
   const repeats = rawRepeats
     ? Object.fromEntries(Object.entries(rawRepeats).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) : undefined;
   const types = Array.isArray(value.types) ? value.types.filter((item): item is string => typeof item === "string") : undefined;
@@ -361,10 +369,12 @@ export async function getItems(): Promise<Item[]> {
 }
 
 export async function getCharacterCreationData() {
-  const [manual, stageRows, specialRows] = await Promise.all([
+  const [manual, stageRows, specialRows, items, heldItemAssets] = await Promise.all([
     getMonsterManualData(),
     request<DigimonStageRow[]>("Digimon Stage", "select=*&order=id.asc"),
     request<SpecialSkillOptionRow[]>("Special Skill Table", "select=*&order=id.asc"),
+    getItems(),
+    request<AssetRow[]>("Asssets", "select=name,image&name=eq.held_items_border&limit=1"),
   ]);
   const stages: DigimonStage[] = stageRows.filter((row) => row.name && row.slug).map((row) => ({
     id: row.id,
@@ -388,7 +398,13 @@ export async function getCharacterCreationData() {
     replaces: cleanNullable(row.replaces_option),
     maximum: row.maximum_category_option === null ? null : number(row.maximum_category_option),
   }));
-  return { ...manual, stages, specialSkillOptions };
+  return {
+    ...manual,
+    stages,
+    specialSkillOptions,
+    items: items.filter((item) => item.type.trim().toLowerCase() === "held"),
+    heldItemsTemplate: cleanNullable(heldItemAssets[0]?.image),
+  };
 }
 
 export function skillStageValue(skill: AttachmentSkill, stage: SkillStage): string | null {

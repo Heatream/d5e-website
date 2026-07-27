@@ -3,13 +3,37 @@ import test from "node:test";
 import { calculateEvolvedHp, calculateHistoryHp, calculateHp, calculateMovement, dieSize, stageRange } from "../app/lib/digimon-rules.ts";
 import { getCharacterCreationData, getItems, parseAttachmentReference, parseAttributeHistory, resolveSkillStage } from "../app/lib/supabase.ts";
 import { accountEmail, normalizeUsername, validateUsername } from "../app/lib/account-rules.ts";
-import { addMatchingDice } from "../app/lib/special-skill-rules.ts";
+import {
+  addMatchingDice, resolveStoredSpecialDamage, selectedChoiceKeys, toggleMultiChoice,
+} from "../app/lib/special-skill-rules.ts";
 
 test("adds matching dice to Special Skill damage", () => {
   assert.equal(addMatchingDice("1d6", 1), "2d6");
   assert.equal(addMatchingDice("1d8", 1), "2d8");
   assert.equal(addMatchingDice("2d10", 2), "4d10");
   assert.equal(addMatchingDice("DC", 1), "DC");
+});
+
+test("repairs legacy saved Special Skill dice from builder choices", () => {
+  const damageOptions = [
+    { key: "1d10_dmg", name: "1d10" },
+    { key: "dc_dmg", name: "DC" },
+    { key: "0_dmg", name: "-" },
+    { key: "fixed_dmg", name: "2" },
+  ];
+  assert.equal(resolveStoredSpecialDamage("1d10 + 2d6", "1d10_dmg", 2, damageOptions), "3d10");
+  assert.equal(resolveStoredSpecialDamage("DC 14", "dc_dmg", 2, damageOptions), "DC 14");
+  assert.equal(resolveStoredSpecialDamage("—", "0_dmg", 2, damageOptions), "—");
+  assert.equal(resolveStoredSpecialDamage("2", "fixed_dmg", 2, damageOptions), "2");
+  assert.equal(resolveStoredSpecialDamage("Malformed", "missing", 2, damageOptions), "Malformed");
+});
+
+test("supports multiple independently priced Special Skill effects", () => {
+  let choices = toggleMultiChoice({}, "effect", "burn");
+  choices = toggleMultiChoice(choices, "effect", "poison");
+  assert.deepEqual(selectedChoiceKeys(choices), ["burn", "poison"]);
+  choices = toggleMultiChoice(choices, "effect", "burn");
+  assert.deepEqual(selectedChoiceKeys(choices), ["poison"]);
 });
 
 test("loads Agumon's Special Skill builder choices", async () => {
@@ -21,6 +45,9 @@ test("loads Agumon's Special Skill builder choices", async () => {
   assert.equal(babyFlame?.repeats?.add_30ft, 1);
   assert.deepEqual(babyFlame?.types, ["Fire"]);
   assert.equal(addMatchingDice("1d6", babyFlame?.repeats?.add_dice ?? 0), "2d6");
+  assert.equal(data.items.length, 13);
+  assert.equal(data.items.every((item) => item.type.toLowerCase() === "held"), true);
+  assert.match(data.heldItemsTemplate ?? "", /(?:held_)?items\.(?:png|webp)$/);
 });
 
 test("normalizes and validates account usernames", () => {
