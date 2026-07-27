@@ -630,6 +630,18 @@ button { cursor: pointer; }
 .manual-skill-details > p { margin: 0; color: #435761; line-height: 1.6; }
 .manual-type-effect { margin-top: 18px; padding: 14px 16px; border-left: 4px solid var(--red); background: #f7efeb; }
 .manual-type-effect p { margin: 5px 0 0; color: #50636b; line-height: 1.5; }
+.special-skill-details { padding: 15px 18px; }
+.special-skill-title { display: grid; grid-template-columns: minmax(180px,auto) minmax(260px,1fr) 34px; align-items: center; gap: 16px; }
+.special-skill-title h3 { font-size: 22px; }
+.special-type-summary { min-width: 0; padding: 9px 12px; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 10px; border-left: 3px solid var(--red); background: #f7efeb; }
+.special-type-summary strong { color: var(--navy); white-space: nowrap; }
+.special-type-summary span { color: #50636b; font-size: 12px; line-height: 1.35; }
+.special-skill-stats { margin: 13px 0; grid-template-columns: repeat(4,minmax(0,1fr)); }
+.special-skill-stats div { padding: 9px 12px; }
+.special-skill-stats dd { margin-top: 3px; font-size: 14px; }
+.special-skill-effects { padding: 10px 12px; display: grid; grid-template-columns: auto minmax(0,1fr); gap: 14px; align-items: start; border: 1px solid var(--line); background: white; }
+.special-skill-effects > strong { color: var(--navy); }
+.special-skill-effects ul { margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px 18px; list-style-position: inside; color: #435761; }
 
 .stat-grid { margin: 0; padding-top: 36px; display: grid; grid-template-columns: repeat(5, 1fr); }
 .stat-grid div { min-height: 76px; padding: 4px 20px; border-right: 1px solid var(--line); }
@@ -685,6 +697,8 @@ button { cursor: pointer; }
   .sheet-actions .edit-digimon-link,.sheet-actions .delete-digimon-button,.sheet-actions .digivolution-button,.sheet-actions .dedigivolution-button,.sheet-actions .held-items-button { min-height: 32px; padding-inline: 9px; font-size: 10px; }
   .manual-skill-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manual-skill-stats div { border-bottom: 1px solid var(--line); }
+  .special-skill-title { grid-template-columns: 1fr 34px; }
+  .special-type-summary { grid-column: 1 / -1; grid-row: 2; }
   .page-shell { width: min(100% - 24px, 1160px); }
   .nav-shell { width: 100%; min-height: 64px; padding: 0 12px; gap: 14px; }
   .brand-word { display: none; }

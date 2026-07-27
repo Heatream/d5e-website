@@ -22,9 +22,25 @@ function cookieOptions(maxAge: number) {
 }
 
 export function applySessionCookies(response: NextResponse, session: TokenResult) {
+  response.headers.set("Cache-Control", "private, no-store");
   response.cookies.set(ACCESS_COOKIE, session.access_token, cookieOptions(session.expires_in));
   response.cookies.set(REFRESH_COOKIE, session.refresh_token, cookieOptions(60 * 60 * 24 * 30));
   return response;
+}
+
+export async function getAccountSummary(userId: string) {
+  const { url } = authConfig();
+  const profileResponse = await fetch(`${url}/rest/v1/account_profiles?user_id=eq.${encodeURIComponent(userId)}&select=username,limit_unlocked&limit=1`, {
+    headers: serviceHeaders(), cache: "no-store",
+  });
+  const profiles = await profileResponse.json().catch(() => []);
+  const profile = profiles[0];
+  if (!profileResponse.ok || !profile) return null;
+  const countResponse = await fetch(`${url}/rest/v1/player_digimon?user_id=eq.${encodeURIComponent(userId)}&parent_digimon_id=is.null&select=id`, {
+    headers: serviceHeaders({ Prefer: "count=exact" }), cache: "no-store",
+  });
+  const rootCount = Number(countResponse.headers.get("content-range")?.split("/")[1] ?? 0);
+  return { authenticated: true, username: profile.username, rootCount, limit: 50, limitUnlocked: Boolean(profile.limit_unlocked) };
 }
 
 export function clearSessionCookies(response: NextResponse) {

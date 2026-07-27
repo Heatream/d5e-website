@@ -45,6 +45,11 @@ test("loads Agumon's Special Skill builder choices", async () => {
   assert.equal(babyFlame?.repeats?.add_30ft, 1);
   assert.deepEqual(babyFlame?.types, ["Fire"]);
   assert.equal(addMatchingDice("1d6", babyFlame?.repeats?.add_dice ?? 0), "2d6");
+  const veemonHead = data.digimon.find((digimon) => digimon.slug === "veemon")?.specialSkills[0];
+  assert.equal(veemonHead?.digislotCost, "1");
+  assert.deepEqual(veemonHead?.types, ["Null"]);
+  assert.deepEqual(veemonHead?.effects, ["Heal 1/4th of the damage deal, rounded up"]);
+  assert.equal(veemonHead?.options, undefined);
   assert.equal(data.items.length, 13);
   assert.equal(data.items.every((item) => item.type.toLowerCase() === "held"), true);
   assert.match(data.heldItemsTemplate ?? "", /(?:held_)?items\.(?:png|webp)$/);

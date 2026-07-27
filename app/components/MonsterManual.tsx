@@ -245,22 +245,20 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         </div>
       </div>}
       </div>
-      {expandedSpecial && <section className="manual-skill-details" id={`manual-special-details-${selected.slug}`} aria-live="polite">
-        <div className="manual-skill-title"><div><span className="eyebrow">Special Skill</span><h3>{expandedSpecial.name}</h3></div><button type="button" onClick={() => setExpandedSpecialIndex(null)} aria-label="Close special skill details">×</button></div>
-        <dl className="manual-skill-stats">
+      {expandedSpecial && <section className="manual-skill-details special-skill-details" id={`manual-special-details-${selected.slug}`} aria-live="polite">
+        <div className="manual-skill-title special-skill-title"><div><span className="eyebrow">Special Skill</span><h3>{expandedSpecial.name}</h3></div>{expandedSpecialType && <div className="special-type-summary"><strong>{expandedSpecialType.name} Type</strong><span>{expandedSpecialType.effect}</span></div>}<button type="button" onClick={() => setExpandedSpecialIndex(null)} aria-label="Close special skill details">×</button></div>
+        <dl className="manual-skill-stats special-skill-stats">
           <div><dt>Power</dt><dd>{formatPower(expandedSpecial.power)}</dd></div>
           <div><dt>Time</dt><dd>{expandedSpecial.time}</dd></div>
           <div><dt>Damage</dt><dd>{expandedSpecial.damage}</dd></div>
           <div><dt>Range</dt><dd>{expandedSpecial.range}</dd></div>
-          <div><dt>Duration</dt><dd>{expandedSpecial.duration}</dd></div>
           <div><dt>Target</dt><dd>{expandedSpecial.target}</dd></div>
           <div><dt>Hit Type</dt><dd>{expandedSpecial.hitType}</dd></div>
           <div><dt>Critical</dt><dd>{expandedSpecial.critical}</dd></div>
-          <div><dt>Digislot Cost</dt><dd>{expandedSpecial.digislotCost}</dd></div>
-          <div><dt>Type</dt><dd>{expandedSpecial.type}</dd></div>
+          <div><dt>Digislot</dt><dd>{expandedSpecial.digislotCost === "—" ? "—" : `${expandedSpecial.digislotCost} ${expandedSpecial.digislotCost === "1" ? "slot" : "slots"}`}</dd></div>
         </dl>
+        {expandedSpecial.effects?.length ? <div className="special-skill-effects"><strong>Effects</strong><ul>{expandedSpecial.effects.map((effect) => <li key={effect}>{effect}</li>)}</ul></div> : null}
         {expandedSpecial.description && <p>{expandedSpecial.description}</p>}
-        {expandedSpecialType && <div className="manual-type-effect"><strong>{expandedSpecialType.name} Type</strong><p>{expandedSpecialType.effect}</p></div>}
       </section>}
       {expandedEntry?.skill && <section className="manual-skill-details" id={`manual-skill-details-${selected.slug}`} aria-live="polite">
         <div className="manual-skill-title"><div><span className="eyebrow">Attachment Skill</span><h3>{expandedEntry.type ? `${expandedEntry.type.name} ${expandedEntry.skill.name}` : expandedEntry.skill.name}</h3></div><button type="button" onClick={() => setExpandedSkillSlot(null)} aria-label="Close skill details">×</button></div>

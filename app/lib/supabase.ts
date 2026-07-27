@@ -42,6 +42,7 @@ export type SpecialSkill = {
   target: string;
   critical: string;
   digislotCost: string;
+  effects?: string[];
   options?: Record<string, string | string[]>;
   repeats?: Record<string, number>;
   types?: string[];
@@ -295,13 +296,18 @@ function specialSkill(value: Record<string, unknown> | null): SpecialSkill | nul
   const repeats = rawRepeats
     ? Object.fromEntries(Object.entries(rawRepeats).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))) : undefined;
   const types = Array.isArray(value.types) ? value.types.filter((item): item is string => typeof item === "string") : undefined;
+  const effects = Array.isArray(value.effects)
+    ? value.effects.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : typeof value.effect === "string" && value.effect.trim() ? [value.effect.trim()] : undefined;
   const stage = [1, 2, 3].includes(Number(value.stage)) ? Number(value.stage) as SkillStage : undefined;
+  const type = cleanNullable(value.type) ?? types?.[0] ?? "-";
   return {
     name: text(value.name), power: text(value.power ?? value.skill_power), time: text(value.time),
     duration: text(value.duration), hitType: text(value.hit_type), range: text(value.range),
-    target: text(value.target), type: text(value.type, "-"), critical: text(value.critical),
-    damage: text(value.damage), description: text(value.description, ""), digislotCost: text(value.digislot_cost),
-    options, repeats, types, stage,
+    target: text(value.target), type, critical: text(value.critical),
+    damage: text(value.damage), description: text(value.description, ""),
+    digislotCost: value.digislot_cost === null || value.digislot_cost === undefined ? "—" : String(value.digislot_cost),
+    effects, options, repeats, types, stage,
   };
 }
 

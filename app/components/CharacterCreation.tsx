@@ -71,6 +71,56 @@ function savedStageMinimum(stageName: string, stages: DigimonStage[]) {
   return stages.find((item) => item.name.toLowerCase() === stageName.toLowerCase())?.minimumLevel ?? 1;
 }
 
+function inferSpecialConfiguration(special: SpecialSkill | undefined, options: SpecialSkillOption[]) {
+  if (!special) return { choices: {} as SpecialChoices, repeats: {} as Record<string, number> };
+  const normalize = (value: unknown) => String(value ?? "").trim().toLowerCase();
+  const byCategory = (category: string) => options.filter((option) => option.category === category);
+  const find = (category: string, value: unknown) => {
+    const target = normalize(value);
+    return byCategory(category).find((option) => normalize(option.name) === target)?.key;
+  };
+  const choices: SpecialChoices = {};
+  const repeats: Record<string, number> = {};
+  const set = (category: string, key?: string) => { if (key) choices[category] = key; };
+
+  set("digislot_cost", find("digislot_cost", special.digislotCost));
+  set("skill_power", find("skill_power", special.power)
+    ?? byCategory("skill_power").find((option) => normalize(option.name).startsWith(normalize(special.power)))?.key);
+  set("duration", find("duration", special.time));
+  set("hit_type", find("hit_type", special.hitType)
+    ?? (normalize(special.hitType).includes("attack") ? "1d20_hit" : normalize(special.hitType).includes("dc") ? "dc_hit" : undefined));
+  set("target", find("target", special.target)
+    ?? (normalize(special.target).includes("one") || normalize(special.target).includes("creature") ? "range" : undefined));
+  set("critical_hit", find("critical_hit", special.critical)
+    ?? (Number(special.critical) === 20 ? "basic" : undefined));
+
+  const damage = special.damage.match(/^(\d+)d(\d+)$/i);
+  if (damage) {
+    set("dice_size", find("dice_size", `1d${damage[2]}`));
+    if (Number(damage[1]) > 1) repeats.add_dice = Number(damage[1]) - 1;
+  } else if (["-", "—", "none"].includes(normalize(special.damage))) {
+    set("dice_size", "0_dmg");
+  }
+
+  const normalizedRange = normalize(special.range);
+  const radius = Number(special.range.match(/(\d+)\s*ft\s*radius/i)?.[1] ?? 0);
+  const rangedFeet = Number(special.range.match(/^\s*(\d+)\s*ft/i)?.[1] ?? 0);
+  set("range", "melee");
+  if (!normalizedRange.startsWith("self") && !normalizedRange.startsWith("melee") && rangedFeet > 0) {
+    repeats.add_30ft = Math.max(1, Math.round(rangedFeet / 30));
+  }
+  if (radius > 0) repeats.add_10rd = Math.max(1, Math.round(radius / 10));
+
+  const typeCount = special.types?.length ?? (special.type && special.type !== "—" ? 1 : 0);
+  if (typeCount > 0) {
+    set("type", "monotype");
+    if (typeCount > 1) repeats.multitype = typeCount - 1;
+  }
+  const effectKeys = (special.effects ?? []).map((effect) => find("effect", effect)).filter((key): key is string => Boolean(key));
+  if (effectKeys.length) choices.effect = effectKeys;
+  return { choices, repeats };
+}
+
 function initialForm(stages: DigimonStage[], attributes: Attribute[], fields: Field[]): FormState {
   const stage = stages[0];
   return {
@@ -142,6 +192,8 @@ export function CharacterCreation(props: {
     );
     const templateSpecial = template.specialSkills[0];
     const templateSpecialTwo = template.specialSkills[1];
+    const inferredSpecial = inferSpecialConfiguration(templateSpecial, props.specialSkillOptions);
+    const inferredSpecialTwo = inferSpecialConfiguration(templateSpecialTwo, props.specialSkillOptions);
     const specialTypeIds = (templateSpecial?.types ?? [templateSpecial?.type ?? ""])
       .map((name) => props.types.find((item) => item.name.toLowerCase() === name.toLowerCase())?.id)
       .filter((id): id is string => Boolean(id));
@@ -165,18 +217,18 @@ export function CharacterCreation(props: {
       specialName: templateSpecial?.name ?? "", specialDescription: templateSpecial?.description ?? "",
       specialTypeId: specialTypeIds[0] ?? "", specialExtraTypeIds: specialTypeIds.slice(1),
       specialStage: templateSpecial?.stage ?? 1,
-      specialChoices: templateSpecial?.options ?? {},
-      repeatCounts: templateSpecial?.repeats ?? {},
+      specialChoices: templateSpecial?.options ?? inferredSpecial.choices,
+      repeatCounts: templateSpecial?.repeats ?? inferredSpecial.repeats,
       specialTwo: {
         name: templateSpecialTwo?.name ?? "", description: templateSpecialTwo?.description ?? "",
         typeId: secondTypeIds[0] ?? "", extraTypeIds: secondTypeIds.slice(1),
         stage: templateSpecialTwo?.stage ?? 1,
-        choices: templateSpecialTwo?.options ?? {},
-        repeatCounts: templateSpecialTwo?.repeats ?? {},
+        choices: templateSpecialTwo?.options ?? inferredSpecialTwo.choices,
+        repeatCounts: templateSpecialTwo?.repeats ?? inferredSpecialTwo.repeats,
       },
     }));
     setMode("details");
-  }, [searchParams, props.digimon, props.stages, props.attributes, props.fields, props.personalitySkills, props.skills, props.types]);
+  }, [searchParams, props.digimon, props.stages, props.attributes, props.fields, props.personalitySkills, props.skills, props.types, props.specialSkillOptions]);
 
   async function refreshAccount() {
     const response = await fetch("/api/auth/session", { cache: "no-store" });
@@ -190,10 +242,10 @@ export function CharacterCreation(props: {
     return next;
   }
 
-  async function loadSavedDigimon() {
+  async function loadSavedDigimon(preserveAccount = false) {
     const response = await fetch("/api/player-digimon", { cache: "no-store" });
     if (response.status === 401) {
-      setAccount(null);
+      if (!preserveAccount) setAccount(null);
       setSaved([]);
       return;
     }
@@ -219,8 +271,12 @@ export function CharacterCreation(props: {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Authentication failed.");
-      await refreshAccount();
-      await loadSavedDigimon();
+      const authenticatedAccount = result.authenticated
+        ? { username: result.username, rootCount: result.rootCount, limit: result.limit, limitUnlocked: result.limitUnlocked }
+        : await refreshAccount();
+      if (!authenticatedAccount) throw new Error("Login succeeded, but the session could not be opened.");
+      setAccount(authenticatedAccount);
+      await loadSavedDigimon(true);
       setAuthPassword("");
       setStatus(authMode === "signup" ? "Account created. Welcome to D5e!" : "Welcome back!");
     } catch (error) {
@@ -622,12 +678,15 @@ export function CharacterCreation(props: {
     return {
       name: form.specialName.trim(), description: form.specialDescription.trim(), type,
       power: choice("skill_power"), time: choice("duration"), duration: "Instant",
-      hitType: choice("hit_type"), range: range30 ? `${range30 * 30}ft${radius10 ? ` (${radius10 * 10}ft radius)` : ""}` : choice("range"),
+      hitType: choice("hit_type"), range: range30
+        ? `${range30 * 30}ft${radius10 ? ` (${radius10 * 10}ft radius)` : ""}`
+        : radius10 ? `Self (${radius10 * 10}ft Radius)` : choice("range"),
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: specialUsesDc
         ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialStage - 1) * 5}`
         : specialHasNoDamage ? "—" : addMatchingDice(damageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
+      effects: selectedOptions.filter((option) => option.category === "effect").map((option) => option.name),
     };
   }
 
@@ -646,12 +705,15 @@ export function CharacterCreation(props: {
       name: form.specialTwo.name.trim(), description: form.specialTwo.description.trim(),
       type: typeNames.join(" / ") || "—",
       power: choice("skill_power"), time: choice("duration"), duration: "Instant",
-      hitType: choice("hit_type"), range: range30 ? `${range30 * 30}ft${radius10 ? ` (${radius10 * 10}ft radius)` : ""}` : choice("range"),
+      hitType: choice("hit_type"), range: range30
+        ? `${range30 * 30}ft${radius10 ? ` (${radius10 * 10}ft radius)` : ""}`
+        : radius10 ? `Self (${radius10 * 10}ft Radius)` : choice("range"),
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: secondUsesDc
         ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialTwo.stage - 1) * 5}`
         : secondHasNoDamage ? "—" : addMatchingDice(secondDamageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
+      effects: secondSelectedOptions.filter((option) => option.category === "effect").map((option) => option.name),
     };
   }
   const secondSpecialSkill = buildSecondSpecialSkill();

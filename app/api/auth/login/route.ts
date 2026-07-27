@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { accountEmail, applySessionCookies, authConfig, normalizeUsername, type TokenResult } from "../../../lib/server-auth";
+import { accountEmail, applySessionCookies, authConfig, getAccountSummary, normalizeUsername, type TokenResult } from "../../../lib/server-auth";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null) as { username?: string; password?: string } | null;
@@ -12,5 +12,7 @@ export async function POST(request: NextRequest) {
   });
   const session = await authResponse.json().catch(() => ({})) as TokenResult;
   if (!authResponse.ok) return NextResponse.json({ error: "Incorrect username or password." }, { status: 401 });
-  return applySessionCookies(NextResponse.json({ username: String(body.username).trim().replace(/\s+/g, " ") }), session);
+  const summary = await getAccountSummary(session.user.id);
+  if (!summary) return NextResponse.json({ error: "This account is missing its D5e profile." }, { status: 409 });
+  return applySessionCookies(NextResponse.json(summary), session);
 }
