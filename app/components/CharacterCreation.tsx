@@ -282,7 +282,8 @@ export function CharacterCreation(props: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: authUsername, password: authPassword }),
       });
-      const result = await response.json();
+      const responseText = await response.text();
+      const result = responseText ? JSON.parse(responseText) : {};
       if (!response.ok) throw new Error(result.error ?? "Authentication failed.");
       const authenticatedAccount = result.authenticated
         ? { username: result.username, rootCount: result.rootCount, limit: result.limit, limitUnlocked: result.limitUnlocked }
@@ -293,7 +294,10 @@ export function CharacterCreation(props: {
       setAuthPassword("");
       setStatus(authMode === "signup" ? "Account created. Welcome to D5e!" : "Welcome back!");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Authentication failed.");
+      const message = error instanceof SyntaxError
+        ? "The login server returned an invalid response. Please try again."
+        : error instanceof Error ? error.message : "Authentication failed.";
+      setStatus(message);
     } finally { setSaving(false); }
   }
 
