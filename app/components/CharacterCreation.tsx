@@ -3,15 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { MonsterManual } from "./MonsterManual";
+import { TamerCreation } from "./TamerCreation";
 import type {
   AttachmentSkill, Attribute, Digimon, DigimonStage, Feat, Field, Item, LevelChart, PersonalitySkill,
-  SpecialSkill, SpecialSkillOption, TypeElement,
+  SpecialSkill, SpecialSkillOption, TamerLevel, TamerSubclass, TamerSubclassFeature, TypeElement,
 } from "../lib/supabase";
 import { calculateEvolvedHp, calculateHp, modifier, normalizeStage } from "../lib/digimon-rules";
 import {
   addMatchingDice, resolveStoredSpecialDamage, selectedChoiceKeys, toggleMultiChoice,
   type SpecialChoices,
 } from "../lib/special-skill-rules";
+import { itemAbilityBonuses } from "../lib/item-rules";
 
 type Account = { username: string; rootCount: number; limit: number; limitUnlocked: boolean };
 type SavedSkillRow = {
@@ -71,6 +73,15 @@ function attachmentDamageMode(skill?: AttachmentSkill) {
 
 function savedStageMinimum(stageName: string, stages: DigimonStage[]) {
   return stages.find((item) => item.name.toLowerCase() === stageName.toLowerCase())?.minimumLevel ?? 1;
+}
+
+function numbersOnlyKeyDown(event: { key: string; preventDefault: () => void }) {
+  if (["e", "E", "+", "-", "."].includes(event.key)) event.preventDefault();
+}
+
+function numericCounterValue(value: string, maximum: number) {
+  const digits = value.replace(/\D/g, "");
+  return Math.min(maximum, Math.max(0, Number(digits || 0)));
 }
 
 function inferSpecialConfiguration(special: SpecialSkill | undefined, options: SpecialSkillOption[]) {
@@ -142,6 +153,8 @@ export function CharacterCreation(props: {
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   stages: DigimonStage[]; specialSkillOptions: SpecialSkillOption[];
   items: Item[]; feats: Feat[]; heldItemsTemplate: string | null; enhancementItemsTemplate: string | null;
+  tamerSubclasses: TamerSubclass[]; tamerLevels: TamerLevel[]; tamerSubclassFeatures: TamerSubclassFeature[];
+  tamerFeats: Feat[]; tamerItems: Item[];
 }) {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"characters" | "digimon">("digimon");
@@ -149,6 +162,8 @@ export function CharacterCreation(props: {
   const [form, setForm] = useState<FormState>(() => initialForm(props.stages, props.attributes, props.fields));
   const [saved, setSaved] = useState<SavedDigimonRow[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState("");
+  const [activeEvolutionByRoot, setActiveEvolutionByRoot] = useState<Record<string, string>>({});
+  const [pendingTamerEvolution, setPendingTamerEvolution] = useState<{ tamerId: string; partnerId: string; parentId: string } | null>(null);
   const [editingId, setEditingId] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
@@ -174,6 +189,22 @@ export function CharacterCreation(props: {
 
   const stage = props.stages.find((item) => item.id === form.stageId) ?? props.stages[0];
   const levelRow = props.levels.find((item) => item.level === form.level) ?? props.levels[0];
+  const editingItems = useMemo(() => {
+    let current = saved.find((row) => String(row.id) === editingId);
+    const visited = new Set<string>();
+    while (current?.parent_digimon_id && !visited.has(String(current.id))) {
+      visited.add(String(current.id));
+      current = saved.find((row) => String(row.id) === String(current?.parent_digimon_id)) ?? current;
+      if (!current.parent_digimon_id) break;
+    }
+    return (current?.player_digimon_items ?? [])
+      .map((entry) => props.items.find((item) => item.id === Number(entry.item_id)))
+      .filter((item): item is Item => Boolean(item));
+  }, [editingId, saved, props.items]);
+  const editingItemBonuses = itemAbilityBonuses(
+    editingItems,
+    Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2,
+  );
   const attribute = props.attributes.find((item) => item.id === (form.stageAttributeIds.at(-1) ?? form.attributeId));
   const field = props.fields.find((item) => item.id === form.fieldId);
   const personality = props.personalitySkills.find((item) => item.id === form.personalitySkillId);
@@ -264,6 +295,16 @@ export function CharacterCreation(props: {
     }
     if (!response.ok) throw new Error("Could not load saved Digimon.");
     setSaved(await response.json());
+  }
+
+  async function updateCurrentHp(id: string, value: number) {
+    const response = await fetch("/api/player-digimon", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, digimon: { current_hp: value } }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) { setStatus(result.error ?? "Could not update current HP."); return; }
+    await loadSavedDigimon(true);
   }
 
   useEffect(() => {
@@ -360,9 +401,13 @@ export function CharacterCreation(props: {
   const selectedStageAttributes = form.stageAttributeIds.slice(0, stageIndex + 1)
     .map((id) => props.attributes.find((item) => item.id === id))
     .filter((item): item is Attribute => Boolean(item));
-  const effectiveWisdom = form.wisdom + selectedStageAttributes.reduce(
-    (bonus, item) => bonus + (item.statBuffs.some((buff) => buff.toLowerCase() === "wisdom") ? 2 : 0), 0,
-  );
+  const effectiveFormStats = Object.fromEntries(abilities.map((ability) => [
+    ability,
+    form[ability]
+      + selectedStageAttributes.reduce((bonus, item) => bonus + (item.statBuffs.some((buff) => buff.toLowerCase() === ability) ? 2 : 0), 0)
+      + editingItemBonuses[ability],
+  ])) as Record<typeof abilities[number], number>;
+  const effectiveWisdom = effectiveFormStats.wisdom;
   const wisdomModifier = modifier(effectiveWisdom);
   const budget = (stage?.specialSkillPoints ?? 0) + wisdomModifier;
   const remaining = budget - spent;
@@ -402,10 +447,13 @@ export function CharacterCreation(props: {
       const history = Array.isArray(row.stage_attribute_ids) ? row.stage_attribute_ids.map(String).filter(Boolean) : [];
       return history.length ? history : row.attribute_id ? [String(row.attribute_id)] : [];
     };
-    const effectiveConstitution = (row: SavedDigimonRow) => Number(row.constitution ?? 8) + attributeIdsFor(row).reduce((bonus, id) => {
+    const equippedItemsFor = (row: SavedDigimonRow) => (rootRowFor(row).player_digimon_items ?? [])
+      .map((entry) => props.items.find((item) => item.id === Number(entry.item_id)))
+      .filter((item): item is Item => Boolean(item));
+    const effectiveConstitution = (row: SavedDigimonRow, requestedLevel: number) => Number(row.constitution ?? 8) + attributeIdsFor(row).reduce((bonus, id) => {
       const item = props.attributes.find((candidate) => candidate.id === id);
       return bonus + (item?.statBuffs.some((buff) => buff.toLowerCase() === "constitution") ? 2 : 0);
-    }, 0);
+    }, 0) + itemAbilityBonuses(equippedItemsFor(row), Number(String(props.levels.find((item) => item.level === requestedLevel)?.proficiency ?? 2).replace("+", "")) || 2).constitution;
     const hitDieFor = (row: SavedDigimonRow) => {
       const savedStage = props.stages.find((item) => item.id === Number(row.stage_id));
       const currentAttributeId = attributeIdsFor(row).at(-1);
@@ -415,13 +463,13 @@ export function CharacterCreation(props: {
     };
     const hpFor = (row: SavedDigimonRow, requestedLevel: number, visited = new Set<string>()): number => {
       const id = String(row.id);
-      const constitution = effectiveConstitution(row);
+      const constitution = effectiveConstitution(row, requestedLevel);
       const parentId = row.parent_digimon_id ? String(row.parent_digimon_id) : "";
       const parent = parentId ? rowsById.get(parentId) : undefined;
       if (!parent || visited.has(id)) return calculateHp(hitDieFor(row), requestedLevel, constitution);
       const nextVisited = new Set(visited).add(id);
       const anchorLevel = Math.max(1, Math.min(20, Number(row.evolved_at_level ?? row.level ?? 1)));
-      const parentConstitution = effectiveConstitution(parent);
+      const parentConstitution = effectiveConstitution(parent, anchorLevel);
       return calculateEvolvedHp(
         hpFor(parent, anchorLevel, nextVisited), hitDieFor(parent), hitDieFor(row),
         parentConstitution, constitution, anchorLevel, requestedLevel,
@@ -515,7 +563,19 @@ export function CharacterCreation(props: {
       },
     };
     });
-  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types, props.specialSkillOptions, props.items, props.feats]);
+  }, [saved, props.stages, props.attributes, props.fields, props.skills, props.types, props.specialSkillOptions, props.items, props.feats, props.levels]);
+  const rootSavedDigimon = savedDigimon.filter(({ row }) => !row.parent_digimon_id);
+
+  function evolutionRootId(row: SavedDigimonRow) {
+    let current = row;
+    const visited = new Set<string>();
+    while (current.parent_digimon_id && !visited.has(String(current.id))) {
+      visited.add(String(current.id));
+      current = saved.find((candidate) => String(candidate.id) === String(current.parent_digimon_id)) ?? current;
+      if (!current.parent_digimon_id) break;
+    }
+    return String(current.id);
+  }
 
   async function saveHeldItems() {
     if (!heldItemEditor) return;
@@ -669,9 +729,11 @@ export function CharacterCreation(props: {
 
   function digivolveSavedDigimon(row: SavedDigimonRow) {
     const rowId = String(row.id);
+    const rootId = evolutionRootId(row);
     const existingChild = saved.find((candidate) => String(candidate.parent_digimon_id ?? "") === rowId);
     if (existingChild) {
-      setSelectedSavedId(String(existingChild.id));
+      setActiveEvolutionByRoot((current) => ({ ...current, [rootId]: String(existingChild.id) }));
+      setSelectedSavedId(rootId);
       return;
     }
     const currentStageIndex = props.stages.findIndex((item) => item.id === Number(row.stage_id));
@@ -698,7 +760,11 @@ export function CharacterCreation(props: {
 
   function dedigivolveSavedDigimon(row: SavedDigimonRow) {
     const parentId = row.parent_digimon_id ? String(row.parent_digimon_id) : "";
-    if (parentId) setSelectedSavedId(parentId);
+    if (parentId) {
+      const rootId = evolutionRootId(row);
+      setActiveEvolutionByRoot((current) => ({ ...current, [rootId]: parentId }));
+      setSelectedSavedId(rootId);
+    }
   }
 
   async function deleteSavedDigimon(id: string, name: string) {
@@ -737,7 +803,7 @@ export function CharacterCreation(props: {
         : radius10 ? `Self (${radius10 * 10}ft Radius)` : choice("range"),
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: specialUsesDc
-        ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialStage - 1) * 5}`
+        ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(effectiveFormStats[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialStage - 1) * 5}`
         : specialHasNoDamage ? "—" : addMatchingDice(damageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
       effects: selectedOptions.filter((option) => option.category === "effect").map((option) => option.name),
@@ -764,7 +830,7 @@ export function CharacterCreation(props: {
         : radius10 ? `Self (${radius10 * 10}ft Radius)` : choice("range"),
       target: targets > 1 ? `${targets} Targets` : choice("target"), critical: choice("critical_hit"),
       damage: secondUsesDc
-        ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(form[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialTwo.stage - 1) * 5}`
+        ? `DC ${8 + (Number.parseInt(String(levelRow?.proficiency ?? "2").replace("+", ""), 10) || 2) + modifier(effectiveFormStats[{ STR: "strength", DEX: "dexterity", CON: "constitution", INT: "intelligence", WIS: "wisdom", CHA: "charisma" }[choice("skill_power").toUpperCase()] as typeof abilities[number]] ?? 8) + (form.specialTwo.stage - 1) * 5}`
         : secondHasNoDamage ? "—" : addMatchingDice(secondDamageName || "—", addDice),
       digislotCost: choice("digislot_cost"),
       effects: secondSelectedOptions.filter((option) => option.category === "effect").map((option) => option.name),
@@ -863,7 +929,26 @@ export function CharacterCreation(props: {
         if (result.code === "DIGIMON_LIMIT_REACHED") setDmOverrideOpen(true);
         throw new Error(result.error ?? "Could not save the Digimon.");
       }
-      await loadSavedDigimon(); setSelectedSavedId(String(result.id)); setMode("list"); setStatus(`${form.name} was ${editingId ? "updated" : "saved"}.`);
+      await loadSavedDigimon();
+      if (form.parentDigimonId) {
+        const parent = saved.find((candidate) => String(candidate.id) === form.parentDigimonId);
+        const rootId = parent ? evolutionRootId(parent) : form.parentDigimonId;
+        setActiveEvolutionByRoot((current) => ({ ...current, [rootId]: String(result.id) }));
+        setSelectedSavedId(rootId);
+      } else {
+        setSelectedSavedId(String(result.id));
+      }
+      if (pendingTamerEvolution && form.parentDigimonId === pendingTamerEvolution.parentId) {
+        const partnerResponse = await fetch("/api/player-tamers/partners", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tamerId: pendingTamerEvolution.tamerId, partnerId: pendingTamerEvolution.partnerId, playerDigimonId: String(result.id) }),
+        });
+        const partnerResult = await partnerResponse.json().catch(() => ({}));
+        if (!partnerResponse.ok) throw new Error(partnerResult.error ?? "The evolution was saved, but could not be attached to the tamer.");
+        setPendingTamerEvolution(null);
+        setTab("characters");
+      }
+      setMode("list"); setStatus(`${form.name} was ${editingId ? "updated" : "saved"}.`);
       await refreshAccount();
       setEditingId("");
       setForm(initialForm(props.stages, props.attributes, props.fields));
@@ -877,7 +962,19 @@ export function CharacterCreation(props: {
       <button role="tab" aria-selected={tab === "characters"} onClick={() => setTab("characters")}>Characters</button>
       <button role="tab" aria-selected={tab === "digimon"} onClick={() => setTab("digimon")}>Digimon</button>
     </div>
-    {tab === "characters" ? <div className="empty-state"><h2>Characters</h2><p>Character creation is coming later.</p></div> : <>
+    {tab === "characters" ? <TamerCreation {...props} account={account} authLoading={authLoading} onDigivolvePartner={(playerDigimonId, tamerId, partnerId) => {
+      const row = saved.find((candidate) => String(candidate.id) === playerDigimonId);
+      if (!row) { setStatus("Could not find that saved partner."); return; }
+      const rootId = evolutionRootId(row);
+      setTab("digimon");
+      setActiveEvolutionByRoot((current) => ({ ...current, [rootId]: playerDigimonId }));
+      setSelectedSavedId(rootId);
+      setPendingTamerEvolution({ tamerId, partnerId, parentId: playerDigimonId });
+      digivolveSavedDigimon(row);
+    }} onAccountChanged={async () => {
+      await refreshAccount();
+      await loadSavedDigimon(true);
+    }} /> : <>
       {status && <p className="creation-status" role="status">{status}</p>}
       {authLoading ? <div className="loading-state">Checking your account…</div> : !account ? <section className="account-gate">
         <div className="account-tabs" role="tablist" aria-label="D5e account">
@@ -935,16 +1032,21 @@ export function CharacterCreation(props: {
       {dmOverrideOpen && <section className="dm-override-panel"><div><span className="eyebrow">DM Override</span><h3>Unlock additional Digimon slots</h3><p>This permanently marks the account as DM-approved in Supabase.</p></div><label>DM Password<input type="password" value={dmPassword} onChange={(event) => setDmPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") unlockLimit(); }} /></label><div><button onClick={() => { setDmOverrideOpen(false); setDmPassword(""); }}>Cancel</button><button className="primary-button" disabled={saving || !dmPassword} onClick={unlockLimit}>Unlock Account</button></div></section>}
       {mode === "list" && <div className="creation-list">
         <div className="creation-list-heading"><div><span className="eyebrow">Your partners</span><h2>Saved Digimon</h2></div><button className="primary-button" onClick={() => { setEditingId(""); setForm(initialForm(props.stages, props.attributes, props.fields)); setMode("details"); }}>Create Digimon</button></div>
-        {savedDigimon.length ? <div className="saved-digimon-list">{savedDigimon.map(({ row, digimon: savedEntry, level: savedLevel, heldItems, enhancementItem, feats }) => {
+        {rootSavedDigimon.length ? <div className="saved-digimon-list">{rootSavedDigimon.map((rootEntry) => {
+          const rootRowId = String(rootEntry.row.id);
+          const activeEntry = savedDigimon.find(({ row }) => String(row.id) === (activeEvolutionByRoot[rootRowId] ?? rootRowId)) ?? rootEntry;
+          const { row, digimon: savedEntry, level: savedLevel, heldItems, enhancementItem, feats } = activeEntry;
           const rowId = String(row.id);
-          const open = selectedSavedId === rowId;
+          const open = selectedSavedId === rootRowId;
           const savedStageIndex = props.stages.findIndex((item) => item.name.toLowerCase() === savedEntry.stage.toLowerCase());
           const minimumLevel = savedEntry.evolvedAtLevel ?? savedStageMinimum(savedEntry.stage, props.stages);
-          return <article className={`saved-digimon-item${open ? " open" : ""}`} key={rowId}>
-            <button type="button" className="saved-digimon-card" onClick={() => setSelectedSavedId(open ? "" : rowId)} aria-expanded={open}>
+          return <article className={`saved-digimon-item${open ? " open" : ""}`} key={rootRowId}>
+            <button type="button" className="saved-digimon-card" onClick={() => setSelectedSavedId(open ? "" : rootRowId)} aria-expanded={open}>
               <span><strong>{savedEntry.name}</strong><small>{savedEntry.stage} · Level {savedLevel}</small></span><span aria-hidden="true">{open ? "−" : "+"}</span>
             </button>
             {open && <MonsterManual {...props} digimon={[savedEntry]} initialSelectedSlug={savedEntry.slug} initialLevel={savedLevel} levelBounds={[minimumLevel, 20]} embedded
+              currentHp={row.current_hp == null ? null : Number(row.current_hp)}
+              onCurrentHpChange={(value) => updateCurrentHp(rowId, value)}
               onDigivolve={savedStageIndex >= 0 && savedStageIndex < props.stages.length - 1 ? () => digivolveSavedDigimon(row) : undefined}
               onDedigivolve={savedEntry.parentId ? () => dedigivolveSavedDigimon(row) : undefined}
               heldItems={heldItems} heldItemsTemplate={props.heldItemsTemplate}
@@ -1027,7 +1129,7 @@ export function CharacterCreation(props: {
                 ? toggleMultiChoice(current.specialChoices, category, option.key)
                 : { ...current.specialChoices, [category]: option.key },
             }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>;
-          })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, repeatCounts: { ...current.repeatCounts, [option.key]: Number(event.target.value) } }))} /></label>)}</fieldset>)}</div>
+          })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" inputMode="numeric" pattern="[0-9]*" step="1" min="0" max="10" value={form.repeatCounts[option.key] ?? 0} onKeyDown={numbersOnlyKeyDown} onChange={(event) => setForm((current) => ({ ...current, repeatCounts: { ...current.repeatCounts, [option.key]: numericCounterValue(event.currentTarget.value, 10) } }))} /></label>)}</fieldset>)}</div>
           {stage?.specialSkillAmount === 2 && <section className="second-special-editor" aria-labelledby="second-special-title">
             <h3 id="second-special-title">Special Skill 2</h3>
             <div className="form-grid special-heading-grid">
@@ -1054,7 +1156,7 @@ export function CharacterCreation(props: {
                     : { ...current.specialTwo.choices, [category]: option.key },
                 },
               }))} /><span>{option.name}</span><small>{option.pointCost >= 0 ? "+" : ""}{option.pointCost}</small></label>;
-            })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" min="0" max="10" value={form.specialTwo.repeatCounts[option.key] ?? 0} onChange={(event) => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, repeatCounts: { ...current.specialTwo.repeatCounts, [option.key]: Number(event.target.value) } } }))} /></label>)}</fieldset>)}</div>
+            })}{options.filter((option) => option.repeatable).map((option) => <label className="repeat-choice" key={option.id}><span>{option.name} ({option.pointCost >= 0 ? "+" : ""}{option.pointCost})</span><input type="number" inputMode="numeric" pattern="[0-9]*" step="1" min="0" max="10" value={form.specialTwo.repeatCounts[option.key] ?? 0} onKeyDown={numbersOnlyKeyDown} onChange={(event) => setForm((current) => ({ ...current, specialTwo: { ...current.specialTwo, repeatCounts: { ...current.specialTwo.repeatCounts, [option.key]: numericCounterValue(event.currentTarget.value, 10) } } }))} /></label>)}</fieldset>)}</div>
           </section>}
           <div className="creator-actions"><button onClick={() => setMode("details")}>Back</button><button className="primary-button" disabled={saving || remaining < 0} onClick={saveDigimon}>{saving ? "Saving…" : "Save Digimon"}</button></div>
         </div>}

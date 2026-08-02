@@ -1,12 +1,13 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   formatPower, resolveSkillStage, skillStageValue, type AttachmentSkill, type Attribute,
   type Digimon, type Feat, type Field, type Item, type LevelChart, type PersonalitySkill, type TypeElement,
 } from "../lib/supabase";
 import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
+import { itemAbilityBonuses } from "../lib/item-rules";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
@@ -33,6 +34,46 @@ function RangeValue({ value }: { value: string }) {
       ? [parenthetical[1], parenthetical[2]]
       : [clean];
   return <span className="range-value" data-fit>{lines.map((line, index) => <span key={`${line}-${index}`}>{line}</span>)}</span>;
+}
+
+function sheetNameLines(value: string, preferredFirstLine?: string) {
+  if (value.length <= 22) return [value];
+  if (preferredFirstLine && value.startsWith(`${preferredFirstLine} `)) {
+    return [preferredFirstLine, value.slice(preferredFirstLine.length + 1)];
+  }
+  const words = value.split(/\s+/);
+  if (words.length < 2) return [value];
+  let best = 1;
+  for (let split = 2; split < words.length; split += 1) {
+    const difference = Math.abs(words.slice(0, split).join(" ").length - words.slice(split).join(" ").length);
+    const bestDifference = Math.abs(words.slice(0, best).join(" ").length - words.slice(best).join(" ").length);
+    if (difference < bestDifference) best = split;
+  }
+  return [words.slice(0, best).join(" "), words.slice(best).join(" ")];
+}
+
+function InlineTracker({ value, maximum, label, onSave }: {
+  value: number; maximum?: number; label: string; onSave?: (value: number) => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  async function commit() {
+    const next = Math.max(0, Math.min(maximum ?? Number.MAX_SAFE_INTEGER, Math.trunc(Number(draft) || 0)));
+    setEditing(false);
+    if (next !== value) await onSave?.(next);
+  }
+  if (!onSave) return <strong>{value}</strong>;
+  return editing
+    ? <input className="sheet-inline-number" type="number" min="0" max={maximum} value={draft} autoFocus
+      aria-label={label} onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => void commit()} onKeyDown={(event) => {
+        if (event.key === "Enter") void commit();
+        if (event.key === "Escape") { setDraft(String(value)); setEditing(false); }
+      }} />
+    : <button type="button" className="sheet-inline-value" title={`Edit ${label}`} onClick={() => { setDraft(String(value)); setEditing(true); }}>
+      <span className="sheet-current-value">{value}</span>
+      {maximum !== undefined && <><span className="sheet-value-divider">/</span><span className="sheet-maximum-value">{maximum}</span></>}
+    </button>;
 }
 
 function useAutoFitText(dependencies: unknown[]) {
@@ -71,14 +112,15 @@ function useAutoFitText(dependencies: unknown[]) {
   return sheetRef;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, heldItems = [], heldItemsTemplate, enhancementItem = null, enhancementItemsTemplate, feats = [], onEdit, onDelete, onDigivolve, onDedigivolve, onManageFeats, onManageItems }: {
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, hideLevelControl = false, heldItems = [], heldItemsTemplate, enhancementItem = null, enhancementItemsTemplate, feats = [], currentHp, onCurrentHpChange, onEdit, onDelete, onDigivolve, onDedigivolve, onManageArmy, onManageFeats, onManageItems }: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
-  initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean;
+  initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean; hideLevelControl?: boolean;
   heldItems?: Array<Item | null>; heldItemsTemplate?: string | null;
   enhancementItem?: Item | null; enhancementItemsTemplate?: string | null;
   feats?: Feat[];
-  onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void; onManageFeats?: () => void; onManageItems?: () => void;
+  currentHp?: number | null; onCurrentHpChange?: (value: number) => Promise<void> | void;
+  onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void; onManageArmy?: () => void; onManageFeats?: () => void; onManageItems?: () => void;
 }) {
   const [selectedSlug, setSelectedSlug] = useState(initialSelectedSlug);
   const [expandedSkillSlot, setExpandedSkillSlot] = useState<number | null>(null);
@@ -88,6 +130,10 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
   const [attributeFilter, setAttributeFilter] = useState("");
   const [fieldFilter, setFieldFilter] = useState("");
   const [level, setLevel] = useState(initialLevel ?? 1);
+
+  useEffect(() => {
+    setSelectedSlug(initialSelectedSlug);
+  }, [initialSelectedSlug]);
   const selected = digimon.find((item) => item.slug === selectedSlug) ?? null;
   const sheetRef = useAutoFitText([selectedSlug, level, expandedSkillSlot, expandedSpecialIndex, heldItems, enhancementItem, feats]);
   const stageOptions = useMemo(() => [...new Set(digimon.map((item) => item.stage).filter(Boolean))], [digimon]);
@@ -120,6 +166,10 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
       const key = buff.toLowerCase() as Ability;
       if (key in stats) stats[key] += 2;
     }));
+    if (!selected.itemBonusesApplied) {
+      const itemBonuses = itemAbilityBonuses([...heldItems, enhancementItem], Number(String(levelRow?.proficiency ?? 2).replace("+", "")) || 2);
+      (Object.keys(itemBonuses) as Ability[]).forEach((ability) => { stats[ability] += itemBonuses[ability]; });
+    }
     const stageName = normalizeStage(selected.stage);
     const hitDie = attribute?.hpDice[stageName === "7th stage" ? "mega" : stageName] ?? "1d6";
     const historyDice = attributeBonuses.map((stageAttribute, index) => {
@@ -157,7 +207,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
       movement: calculateMovement(stats.dexterity),
       attachmentSkills, personality, skillName, personalitySkill,
     };
-  }, [selected, attributes, fields, levels, level, skills, types, personalitySkills]);
+  }, [selected, attributes, fields, levels, level, skills, types, personalitySkills, heldItems, enhancementItem]);
 
   function selectDigimon(item: Digimon) {
     if (selectedSlug === item.slug) {
@@ -184,29 +234,30 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
 
   const selectedContent = selected && view ? (
     <section className="selected-digimon" id={`digimon-sheet-${selected.slug}`}>
-      <div className="manual-controls sheet-level-controls">
-        <div className="level-control">
+      {(!hideLevelControl || onDedigivolve || onDigivolve || onManageArmy || onManageFeats || onManageItems || onEdit || onDelete || !embedded) && <div className={`manual-controls sheet-level-controls${hideLevelControl ? " actions-only" : ""}`}>
+        {!hideLevelControl && <div className="level-control">
           <div><span>D-Level · {selected.stage}</span><strong>{level}</strong></div>
           <input type="range" min={range[0]} max={range[1]} value={level} onChange={(event) => { setLevel(Number(event.target.value)); setExpandedSkillSlot(null); setExpandedSpecialIndex(null); }} aria-label={`${selected.name} level`} />
           <div className="level-marks"><span>{range[0]}</span><span>{range[1]}</span></div>
-        </div>
+        </div>}
         <div className="sheet-actions">
           {onDedigivolve && <button type="button" className="dedigivolution-button" onClick={onDedigivolve}>De-Digivolve</button>}
           {onDigivolve && <button type="button" className="digivolution-button" onClick={onDigivolve}>Digivolve</button>}
+          {onManageArmy && <button type="button" className="army-button" onClick={onManageArmy}>Army</button>}
           {onManageFeats && <button type="button" className="feats-button" onClick={onManageFeats}>Feats</button>}
           {onManageItems && <button type="button" className="held-items-button" onClick={onManageItems}>Items</button>}
           {!embedded && <Link className="edit-digimon-link" href={`/character-creation?template=${encodeURIComponent(selected.slug)}`}>Edit Digimon</Link>}
           {onEdit && <button type="button" className="edit-digimon-link" onClick={onEdit}>Edit</button>}
           {onDelete && <button type="button" className="delete-digimon-button" onClick={onDelete}>Delete</button>}
         </div>
-      </div>
+      </div>}
       <div ref={sheetRef} className={`digimon-sheet-stack${feats.length || heldItems.some(Boolean) || enhancementItem ? " has-equipped-items" : ""}`}>
       <article className="digimon-sheet" aria-label={`${selected.name} level ${level} stat sheet`}>
         <DigimonPortrait className="sheet-portrait" src={selected.image} name={selected.name} />
         {view.field?.border && <img className="sheet-template" src={view.field.border} alt="" aria-hidden="true" />}
         <h2 className="print-name" data-fit>{selected.name}</h2>
         <div className="print-level"><strong>{level}</strong></div>
-        <div className="print-hp"><small>{view.hitDie}</small><strong>{view.hp}</strong></div>
+        <div className="print-hp"><small>{view.hitDie}</small><InlineTracker value={currentHp ?? view.hp} maximum={view.hp} label={`${selected.name} current HP`} onSave={onCurrentHpChange} /></div>
         <div className="print-ac"><span>{view.ac}</span></div>
         <div className="print-prof"><span>{view.levelRow?.proficiency ?? "+2"}</span></div>
         <div className="print-dl"><strong>{view.levelRow?.digislot ?? 1}</strong></div>
@@ -214,20 +265,26 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         {view.attribute?.image && <img className="print-attribute" src={view.attribute.image} alt={`${selected.attribute} attribute`} />}
         <div className="print-abilities">{abilityOrder.map((ability) => <div key={ability}><strong>{view.stats[ability]}</strong></div>)}</div>
         {specialSkills.length > 0 && <div className="print-special" data-count={specialSkills.length}>
-          {specialSkills.map((special, index) => <button type="button" key={`${special.name}-${index}`} onClick={() => { setExpandedSpecialIndex((current) => current === index ? null : index); setExpandedSkillSlot(null); }} aria-expanded={expandedSpecialIndex === index} aria-controls={`manual-special-details-${selected.slug}`}>
-            <strong data-fit>{special.name}</strong>
-            <RangeValue value={special.range} />
-            <span data-fit>{formatPower(special.power)}</span>
-            <span data-fit>{special.damage}</span>
-          </button>)}
+          {specialSkills.map((special, index) => {
+            const nameLines = sheetNameLines(special.name);
+            return <button type="button" key={`${special.name}-${index}`} onClick={() => { setExpandedSpecialIndex((current) => current === index ? null : index); setExpandedSkillSlot(null); }} aria-expanded={expandedSpecialIndex === index} aria-controls={`manual-special-details-${selected.slug}`}>
+              <strong className={`special-sheet-name${nameLines.length > 1 ? " split" : ""}`} data-fit>{nameLines.map((line) => <span key={line}>{line}</span>)}</strong>
+              <RangeValue value={special.range} />
+              <span data-fit>{formatPower(special.power)}</span>
+              <span data-fit>{special.damage}</span>
+            </button>;
+          })}
         </div>}
         <div className="print-attachments">
           {view.attachmentSkills.length ? view.attachmentSkills.map((entry, index) => {
             if (!entry) return <div className="attachment-slot-empty" key={`empty-${index}`} />;
             const { ref, skill, type, stage: skillStage, power, damage } = entry;
             if (!skill) return <div className="attachment-slot-unavailable" key={`invalid-${ref.slot}`} title={ref.raw}><span>Unavailable skill</span><span>—</span><span>—</span><span>—</span></div>;
+            const stageLabel = skillStage > 1 ? ` ${skillStage === 2 ? "II" : "III"}` : "";
+            const attachmentName = `${type ? `${type.name} ` : ""}${skill.name}${stageLabel}`;
+            const attachmentNameLines = sheetNameLines(attachmentName, type?.name);
             return <button type="button" key={`${ref.slot}-${ref.skill}`} onClick={() => { setExpandedSkillSlot((current) => current === ref.slot ? null : ref.slot); setExpandedSpecialIndex(null); }} aria-expanded={expandedSkillSlot === ref.slot} aria-controls={`manual-skill-details-${selected.slug}`}>
-              <span data-fit>{type ? `${type.name} ${skill.name}` : skill.name}{skillStage > 1 ? ` · ${skillStage === 2 ? "II" : "III"}` : ""}</span>
+              <span className={`attachment-sheet-name${attachmentNameLines.length > 1 ? " split" : ""}`} data-fit>{attachmentNameLines.map((line) => <span key={line}>{line}</span>)}</span>
               <RangeValue value={skill.range} /><span data-fit>{formatPower(power)}</span><span data-fit>{damage}</span>
             </button>;
           }) : <p>No attachment skills unlocked.</p>}

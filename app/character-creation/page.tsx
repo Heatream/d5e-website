@@ -11,9 +11,9 @@ export default async function CharacterCreationPage() {
       <div className="hero-orbit orbit-one" />
       <div className="hero-orbit orbit-two" />
       <div className="page-shell hero-content">
-        <p className="eyebrow light">D5e Partner Builder</p>
+        <p className="eyebrow light">D5e Character Builder</p>
         <h1>Character Creation</h1>
-        <p>Create a Digimon from scratch, build its signature skill, and keep every partner in your D5e account.</p>
+        <p>Build tamers, create Digimon partners, and keep every sheet together in your D5e account.</p>
       </div>
     </section>
     <div className="page-shell creation-page-shell">

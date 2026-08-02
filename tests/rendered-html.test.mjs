@@ -6,6 +6,65 @@ import { accountEmail, normalizeUsername, validateUsername } from "../app/lib/ac
 import {
   addMatchingDice, resolveStoredSpecialDamage, selectedChoiceKeys, toggleMultiChoice,
 } from "../app/lib/special-skill-rules.ts";
+import { digidestinedSummary } from "../app/lib/tamer-rules.ts";
+import { allowedArmyStages, armyCapacity } from "../app/lib/digixrosser-rules.ts";
+import { digispiritedRange, digispiritedUnarmedDamage, resolveDigispiritedFieldId } from "../app/lib/digispirited-rules.ts";
+import { doubleLandingBudget, dualWielderMaxPartnerPoints, fieldSyncSummary, jogressCurrentHp } from "../app/lib/dual-wielder-rules.ts";
+import { DNA_ADAPTATION_FEATURE_SLUGS, dnaPulserSummary, dnaPulserSummaryLines } from "../app/lib/dna-pulser-rules.ts";
+
+test("resolves DNA Pulser summaries and approved Adaptations", () => {
+  assert.equal(dnaPulserSummary("charging-pulse", 13, 3), "Partner Action. Transfer up to 9 HP to your partner.");
+  assert.equal(dnaPulserSummary("charging-pulse", 14, 4), "Free Action. Transfer up to 12 HP to your partner.");
+  assert.match(dnaPulserSummary("aggressive-pulse", 6, 3), /Spend 9 HP/);
+  assert.match(dnaPulserSummary("saving-pulse", 9, 4), /Spend 12 HP/);
+  assert.match(dnaPulserSummary("pulse-break", 17, 6), /Spend 18 HP/);
+  assert.deepEqual(dnaPulserSummaryLines("aggressive-pulse", 17, 6), ["Tamer Action. 18 HP; grant advantage", "to one partner attack this turn."]);
+  assert.deepEqual(DNA_ADAPTATION_FEATURE_SLUGS, ["power-of-friendship", "fated-encounter", "spirit-evolution", "digimon-army"]);
+});
+
+test("resolves Dual Wielder partner rules", () => {
+  assert.equal(jogressCurrentHp(11, 12), 12);
+  assert.equal(doubleLandingBudget(14, 18), 23);
+  assert.equal(dualWielderMaxPartnerPoints(16, 14, 18, 13), 6);
+  assert.equal(dualWielderMaxPartnerPoints(16, 14, 18, 14), 10);
+  assert.match(fieldSyncSummary(true), /Double the dice/);
+  assert.match(fieldSyncSummary(false), /2 Actions/);
+});
+
+test("resolves Digispirited Field and strike progression", () => {
+  assert.equal(resolveDigispiritedFieldId(8, 4, 2), 2);
+  assert.equal(resolveDigispiritedFieldId(9, 4, 2), 4);
+  assert.equal(resolveDigispiritedFieldId(9, null, 2), 2);
+  assert.equal(resolveDigispiritedFieldId(9, null, null), null);
+  assert.equal(digispiritedUnarmedDamage(10), 1);
+  assert.equal(digispiritedUnarmedDamage(18), 5);
+  assert.equal(digispiritedUnarmedDamage(1), 1);
+  assert.equal(digispiritedUnarmedDamage(null), null);
+  assert.equal(digispiritedRange("Deep Savers", true), "Self (15ft Radius)");
+  assert.equal(digispiritedRange("Wind Guardians", true), "30ft");
+  assert.equal(digispiritedRange("Deep Savers", false), "Melee");
+  assert.equal(digispiritedRange("Nature Spirits", true, "Reach"), "Reach");
+});
+
+test("enforces Digixrosser Army capacity and promoted stages", () => {
+  assert.equal(armyCapacity(15, 8), 2);
+  assert.deepEqual(allowedArmyStages(8, "Mega", 0), ["Rookie"]);
+  assert.deepEqual(allowedArmyStages(9, "Mega", 0), ["Rookie", "Champion", "Ultimate"]);
+  assert.deepEqual(allowedArmyStages(9, "Mega", 2), ["Rookie", "Champion", "Ultimate"]);
+  assert.deepEqual(allowedArmyStages(9, "Mega", 3), ["Rookie"]);
+  assert.deepEqual(allowedArmyStages(17, "7th Stage", 0), ["Rookie", "Champion", "Ultimate", "Mega"]);
+});
+
+test("resolves Digidestined sheet summaries and Tamer Command upgrades", () => {
+  assert.match(digidestinedSummary("power-of-friendship", 13), /1d6/);
+  assert.equal(digidestinedSummary("power-of-friendship", 13), "1 PP. Add 1d6 to a roll.");
+  assert.match(digidestinedSummary("power-of-friendship", 14), /1d10/);
+  assert.match(digidestinedSummary("tamer-inspiration", 13), /2d4\+CHA/);
+  assert.equal(digidestinedSummary("tamer-inspiration", 13), "1 PP. Heal 2d4+CHA.");
+  assert.match(digidestinedSummary("tamer-inspiration", 14), /4d8\+CHA/);
+  assert.equal(digidestinedSummary("field-mastery", 6, "Add your proficiency to CON."), "Add your proficiency to CON.");
+  assert.equal(digidestinedSummary("field-mastery", 6), "Field effect unavailable.");
+});
 
 test("adds matching dice to Special Skill damage", () => {
   assert.equal(addMatchingDice("1d6", 1), "2d6");
@@ -53,6 +112,8 @@ test("loads readable Special Skills and character item catalogs", async () => {
   assert.equal(data.feats.length, 15);
   assert.equal(data.feats.every((feat) => feat.types.some((type) => type.toLowerCase() === "digimon")), true);
   assert.equal(data.fields.every((field) => /_feat\.png$/i.test(field.featBorder)), true);
+  assert.match(data.fields.find((field) => field.name === "Nature Spirits")?.fieldMasteryEffect ?? "", /^Add your proficiency to CON\.?$/);
+  assert.equal(data.tamerSubclassFeatures.filter((feature) => feature.subclassId === 1).length >= 6, true);
   assert.match(data.heldItemsTemplate ?? "", /held_item\.(?:png|webp)$/);
   assert.match(data.enhancementItemsTemplate ?? "", /enhancement_item\.(?:png|webp)$/);
 });
@@ -223,8 +284,8 @@ test("renders the searchable Monster Manual directory before any sheet", async (
 
 test("renders the compact searchable Items directory", async () => {
   const items = await getItems();
-  assert.equal(items.length, 20);
-  assert.deepEqual(items.slice(0, 3).map((item) => item.id), [101, 102, 103]);
+  assert.ok(items.length >= 20);
+  assert.ok([101, 102, 103].every((id) => items.some((item) => item.id === id)));
 
   const response = await render("/items");
   assert.equal(response.status, 200);

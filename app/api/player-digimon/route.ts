@@ -85,6 +85,32 @@ export async function PATCH(request: NextRequest) {
   const { headers, session } = auth;
   const { url } = config();
   const body = await request.json().catch(() => null) as { id?: string; digimon?: Record<string, unknown>; skills?: Record<string, unknown>[] } | null;
+  if (body?.id && body.digimon && !body.skills) {
+    const allowed = ["current_hp", "current_digislot", "experience"] as const;
+    const quick = Object.fromEntries(
+      allowed
+        .filter((key) => Object.prototype.hasOwnProperty.call(body.digimon, key))
+        .map((key) => [key, Math.max(0, Math.trunc(Number(body.digimon?.[key] ?? 0)))]),
+    );
+    if (!Object.keys(quick).length) return sessionResponse(session, { error: "No editable tracker was supplied." }, { status: 400 });
+    if (Object.prototype.hasOwnProperty.call(quick, "current_digislot")) {
+      const digimonResponse = await fetch(`${url}/rest/v1/player_digimon?id=eq.${encodeURIComponent(body.id)}&select=level&limit=1`, { headers, cache: "no-store" });
+      const digimonRows = await digimonResponse.json().catch(() => []);
+      if (!digimonResponse.ok || !digimonRows[0]) return sessionResponse(session, { error: "That Digimon could not be found." }, { status: 404 });
+      const level = Math.max(1, Math.min(20, Number(digimonRows[0].level ?? 1)));
+      const levelResponse = await fetch(`${url}/rest/v1/D%20Level%20Chart?level=eq.${level}&select=digislot&limit=1`, { headers, cache: "no-store" });
+      const levelRows = await levelResponse.json().catch(() => []);
+      if (!levelResponse.ok || !levelRows[0]) return sessionResponse(session, { error: "Could not resolve the Digislot maximum." }, { status: 400 });
+      quick.current_digislot = Math.min(Number(quick.current_digislot), Math.max(0, Number(levelRows[0].digislot ?? 0)));
+    }
+    const response = await fetch(`${url}/rest/v1/player_digimon?id=eq.${encodeURIComponent(body.id)}`, {
+      method: "PATCH", headers,
+      body: JSON.stringify({ ...quick, updated_at: new Date().toISOString() }), cache: "no-store",
+    });
+    const result = await response.json().catch(() => []);
+    if (!response.ok || !result[0]) return sessionResponse(session, { error: result?.message ?? "Could not update the tracker." }, { status: response.status || 404 });
+    return sessionResponse(session, result[0]);
+  }
   if (!body?.id || !body.digimon || !Array.isArray(body.skills)) return NextResponse.json({ error: "Invalid Digimon data." }, { status: 400 });
   const digimon: Record<string, unknown> & { user_id: string; parent_digimon_id?: unknown } = {
     ...body.digimon,

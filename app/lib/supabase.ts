@@ -18,6 +18,12 @@ export type TypeElement = { id: string; name: string; effect: string };
 export type PersonalitySkill = { id: string; name: string; personalities: string[]; description: string };
 export type Item = { id: number; name: string; type: string; description: string; slug: string; image: string | null };
 export type Feat = { id: number; name: string; types: string[]; description: string };
+export type TamerSubclass = { id: number; slug: string; name: string; description: string; border: string | null };
+export type TamerLevel = { level: number; proficiencyBonus: number; maxEvolutionStage: string };
+export type TamerSubclassFeature = {
+  id: number; subclassId: number; slug: string; name: string;
+  levelRequired: number; description: string; sortOrder: number;
+};
 
 export type DigimonSkillRef = {
   raw: string;
@@ -75,9 +81,13 @@ export type Digimon = {
   baseAc?: number;
   parentId?: string | null;
   evolvedAtLevel?: number | null;
+  itemBonusesApplied?: boolean;
 };
 
-export type Field = { id: number; name: string; abbreviation: string; symbol: string; border: string; featBorder: string };
+export type Field = {
+  id: number; name: string; abbreviation: string; symbol: string; border: string;
+  featBorder: string; fieldMasteryEffect: string | null; digispiritedEffect: string | null;
+};
 export type Attribute = { id: string; name: string; statBuffs: string[]; hpDice: Record<string, string>; image: string };
 export type LevelChart = {
   level: number;
@@ -135,8 +145,15 @@ type DigimonRow = {
   attachment_skill_3: string | null; attachment_skill_4: string | null;
   special_skill: Record<string, unknown> | Record<string, unknown>[] | null; "personality skill": string | null;
 };
-type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null; feat_border: string | null };
+type FieldRow = { id: number; name: string | null; abbreviation: string | null; symbol: string | null; border: string | null; feat_border: string | null; field_mastery_effect: string | null; digispirited_effect: string | null };
 type FeatRow = { id: number | string | null; name: string | null; type: string | null; description: string | null };
+type TamerSubclassRow = { id: number | string | null; slug: string | null; name: string | null; description: string | null; border: string | null };
+type TamerLevelRow = { level: number | string | null; proficiency_bonus: number | string | null; max_evolution_stage: string | null };
+type TamerSubclassFeatureRow = {
+  id: number | string | null; subclass_id: number | string | null; slug: string | null;
+  name: string | null; level_required: number | string | null; description: string | null;
+  sort_order: number | string | null;
+};
 type AttributeRow = {
   id: string; name: string | null; "+2 stat buff": string | null; "hp dice rookie": string | null;
   "hp dice champion": string | null; "hp dice ultimate": string | null; "hp dice mega": string | null; image: string | null;
@@ -347,6 +364,8 @@ export async function getMonsterManualData() {
   const fields: Field[] = fieldRows.filter((row) => row.abbreviation).map((row) => ({
     id: row.id, name: text(row.name), abbreviation: text(row.abbreviation), symbol: text(row.symbol, ""),
     border: text(row.border, ""), featBorder: text(row.feat_border, ""),
+    fieldMasteryEffect: cleanNullable(row.field_mastery_effect),
+    digispiritedEffect: cleanNullable(row.digispirited_effect),
   }));
   const attributes: Attribute[] = attributeRows.filter((row) => row.name).map((row) => ({
     id: row.id, name: text(row.name), statBuffs: commaList(row["+2 stat buff"]),
@@ -389,14 +408,48 @@ export async function getFeats(): Promise<Feat[]> {
     }));
 }
 
+async function getTamerReferenceData() {
+  const [subclassRows, levelRows, featureRows, featRows, items] = await Promise.all([
+    request<TamerSubclassRow[]>("tamer_subclasses", "select=*&order=id.asc"),
+    request<TamerLevelRow[]>("tamer_level_chart", "select=*&order=level.asc"),
+    request<TamerSubclassFeatureRow[]>("tamer_subclass_features", "select=*&order=sort_order.asc"),
+    request<FeatRow[]>("Feats", "select=*&order=id.asc"),
+    getItems(),
+  ]);
+  const tamerSubclasses: TamerSubclass[] = subclassRows.map((row) => ({
+    id: number(row.id), slug: text(row.slug, ""), name: text(row.name, "Unnamed subclass"),
+    description: text(row.description, ""), border: cleanNullable(row.border),
+  }));
+  const tamerLevels: TamerLevel[] = levelRows.map((row) => ({
+    level: number(row.level, 1), proficiencyBonus: number(row.proficiency_bonus, 2),
+    maxEvolutionStage: text(row.max_evolution_stage, "Rookie"),
+  }));
+  const tamerSubclassFeatures: TamerSubclassFeature[] = featureRows
+    .filter((row) => row.name && row.slug)
+    .map((row) => ({
+      id: number(row.id), subclassId: number(row.subclass_id), slug: text(row.slug),
+      name: text(row.name), levelRequired: number(row.level_required, 1),
+      description: text(row.description, "Description unavailable."), sortOrder: number(row.sort_order),
+    }));
+  const tamerFeats: Feat[] = featRows
+    .filter((row) => commaList(row.type).some((type) => type.toLowerCase() === "tamer"))
+    .map((row) => ({
+      id: number(row.id), name: text(row.name, "Unnamed feat"),
+      types: commaList(row.type), description: text(row.description, "No description available."),
+    }));
+  const tamerItems = items.filter((item) => commaList(item.type).some((type) => type.toLowerCase() === "tamer"));
+  return { tamerSubclasses, tamerLevels, tamerSubclassFeatures, tamerFeats, tamerItems };
+}
+
 export async function getCharacterCreationData() {
-  const [manual, stageRows, specialRows, items, feats, itemAssets] = await Promise.all([
+  const [manual, stageRows, specialRows, items, feats, itemAssets, tamer] = await Promise.all([
     getMonsterManualData(),
     request<DigimonStageRow[]>("Digimon Stage", "select=*&order=id.asc"),
     request<SpecialSkillOptionRow[]>("Special Skill Table", "select=*&order=id.asc"),
     getItems(),
     getFeats(),
     request<AssetRow[]>("Asssets", "select=name,image&name=in.(held_items_border,enhancement_items_border)"),
+    getTamerReferenceData(),
   ]);
   const stages: DigimonStage[] = stageRows.filter((row) => row.name && row.slug).map((row) => ({
     id: row.id,
@@ -428,6 +481,7 @@ export async function getCharacterCreationData() {
     items: items.filter((item) => ["held", "enhancement"].includes(item.type.trim().toLowerCase())),
     heldItemsTemplate: cleanNullable(itemAssets.find((asset) => asset.name === "held_items_border")?.image),
     enhancementItemsTemplate: cleanNullable(itemAssets.find((asset) => asset.name === "enhancement_items_border")?.image),
+    ...tamer,
   };
 }
 
