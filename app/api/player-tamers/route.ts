@@ -172,6 +172,7 @@ export async function PATCH(request: NextRequest) {
     return sessionResponse(session, result[0]);
   }
   if (!body?.id || !validBody(body)) return sessionResponse(session, { error: "Invalid tamer data." }, { status: 400 });
+  const tamer = body.tamer!;
   const previousResponse = await fetch(`${url}/rest/v1/player_tamers?id=eq.${encodeURIComponent(body.id)}&select=subclass_id&limit=1`, {
     headers, cache: "no-store",
   });
@@ -180,10 +181,10 @@ export async function PATCH(request: NextRequest) {
     return sessionResponse(session, { error: "Could not load the existing tamer." }, { status: previousResponse.status || 404 });
   }
   const previousSubclassId = previousRows[0].subclass_id == null ? "" : String(previousRows[0].subclass_id);
-  const nextSubclassId = body.tamer.subclass_id == null ? "" : String(body.tamer.subclass_id);
+  const nextSubclassId = tamer.subclass_id == null ? "" : String(tamer.subclass_id);
   const response = await fetch(`${url}/rest/v1/player_tamers?id=eq.${encodeURIComponent(body.id)}`, {
     method: "PATCH", headers,
-    body: JSON.stringify({ ...body.tamer, user_id: session.user.id, updated_at: new Date().toISOString() }), cache: "no-store",
+    body: JSON.stringify({ ...tamer, user_id: session.user.id, updated_at: new Date().toISOString() }), cache: "no-store",
   });
   const result = await response.json().catch(() => []);
   if (!response.ok || !result[0]) return sessionResponse(session, { error: result?.message ?? "Could not update the tamer." }, { status: response.status || 404 });
