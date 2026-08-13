@@ -9,7 +9,7 @@ import type {
 import { calculateHistoryHp, calculateHp, modifier } from "../lib/digimon-rules";
 import { addMatchingDice, selectedChoiceKeys, toggleMultiChoice, type SpecialChoices } from "../lib/special-skill-rules";
 import { digidestinedSummary } from "../lib/tamer-rules";
-import { allowedArmyStages } from "../lib/digixrosser-rules";
+import { allowedArmyStages, armyXrossBonuses } from "../lib/digixrosser-rules";
 import { digispiritedRange, digispiritedUnarmedDamage, resolveDigispiritedFieldId } from "../lib/digispirited-rules";
 import { doubleLandingBudget, dualWielderMaxPartnerPoints, fieldSyncSummary, jogressCurrentHp } from "../lib/dual-wielder-rules";
 import { DNA_ADAPTATION_FEATURE_SLUGS, dnaPulserSummary, dnaPulserSummaryLines } from "../lib/dna-pulser-rules";
@@ -41,14 +41,17 @@ type DigiArmsManagerState = {
 };
 type ArmyMember = {
   id?: string; slot_number: number; name: string; field_id: number;
-  main_ability: typeof ABILITIES[number]; stage: string; image_path?: string | null;
+  main_ability: typeof ABILITIES[number]; stage: string; image_path?: string | null; is_xrossed?: boolean;
 };
 type ArmyManagerState = {
   tamerId: string; name: string; capacity: number; level: number; partnerStage: string; members: ArmyMember[];
 };
 type PartnerRow = {
   id?: string; slot_number?: number; player_digimon_id?: string;
-  player_digimon?: Record<string, unknown> & { player_digimon_skills?: Array<Record<string, unknown>> };
+  player_digimon?: Record<string, unknown> & {
+    player_digimon_skills?: Array<Record<string, unknown>>;
+    player_digimon_feats?: Array<{ feat_id?: number }>;
+  };
 };
 type TamerInventoryEntry = {
   id?: string; item_id?: number | null; custom_name?: string | null;
@@ -219,6 +222,7 @@ function EditableNumber({ value, maximum, label, onSave, compact = false }: {
 function asDigimon(
   row: PartnerRow["player_digimon"],
   props: Pick<TamerCreationProps, "stages" | "attributes" | "fields" | "skills" | "types" | "items" | "levels">,
+  abilityBonuses: Record<string, number> = {},
 ): Digimon | null {
   if (!row) return null;
   const stage = props.stages.find((item) => item.id === Number(row.stage_id));
@@ -253,12 +257,12 @@ function asDigimon(
     id: -1, name: String(row.name ?? "Partner"), slug: `tamer-partner-${String(row.id)}`,
     stage: stage?.name ?? "Rookie", attribute: attribute?.name ?? "", attributeHistory, field: field?.abbreviation ?? "",
     image: row.image_path ? String(row.image_path) : null,
-    strength: Number(row.strength ?? 10) + itemBonuses.strength,
-    dexterity: Number(row.dexterity ?? 10) + itemBonuses.dexterity,
-    constitution: Number(row.constitution ?? 10) + itemBonuses.constitution,
-    intelligence: Number(row.intelligence ?? 10) + itemBonuses.intelligence,
-    wisdom: Number(row.wisdom ?? 10) + itemBonuses.wisdom,
-    charisma: Number(row.charisma ?? 10) + itemBonuses.charisma,
+    strength: Number(row.strength ?? 10) + itemBonuses.strength + (abilityBonuses.strength ?? 0),
+    dexterity: Number(row.dexterity ?? 10) + itemBonuses.dexterity + (abilityBonuses.dexterity ?? 0),
+    constitution: Number(row.constitution ?? 10) + itemBonuses.constitution + (abilityBonuses.constitution ?? 0),
+    intelligence: Number(row.intelligence ?? 10) + itemBonuses.intelligence + (abilityBonuses.intelligence ?? 0),
+    wisdom: Number(row.wisdom ?? 10) + itemBonuses.wisdom + (abilityBonuses.wisdom ?? 0),
+    charisma: Number(row.charisma ?? 10) + itemBonuses.charisma + (abilityBonuses.charisma ?? 0),
     proficiencies: csv(row.proficiencies), savingThrows: csv(row.saving_throws), weakness: csv(row.weaknesses),
     personalitySkill: String(row.personality_skill ?? ""), attachmentSkills: attachments,
     specialSkills: rawSpecial.filter((item): item is SpecialSkill => Boolean(item && typeof item === "object")),
@@ -275,8 +279,16 @@ function digimonLoadout(row: PartnerRow["player_digimon"], items: Item[]) {
   return { heldItems: [resolveSlot(1), resolveSlot(2)] as Array<Item | null>, enhancementItem: resolveSlot(3) };
 }
 
+function digimonFeats(row: PartnerRow["player_digimon"], feats: Feat[]) {
+  const entries = Array.isArray(row?.player_digimon_feats) ? row.player_digimon_feats : [];
+  return entries
+    .map((entry) => feats.find((feat) => feat.id === Number(entry.feat_id)))
+    .filter((feat): feat is Feat => Boolean(feat));
+}
+
 export type TamerCreationProps = {
   account: Account | null; authLoading: boolean; onAccountChanged: () => Promise<void>;
+  onEditPartner: (playerDigimonId: string) => void;
   onDigivolvePartner: (playerDigimonId: string, tamerId: string, partnerId: string) => void;
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
@@ -510,6 +522,7 @@ export function TamerCreation(props: TamerCreationProps) {
         ? allDigimon.find((row) => String(row.parent_digimon_id ?? "") === currentId)
         : allDigimon.find((row) => String(row.id) === String(current?.parent_digimon_id ?? ""));
       if (!target && direction === "up") {
+        await clearArmyXross(tamerId);
         props.onDigivolvePartner(currentId, tamerId, String(partner.id));
         return;
       }
@@ -520,11 +533,34 @@ export function TamerCreation(props: TamerCreationProps) {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error ?? "Could not change the partner's evolution.");
+      await clearArmyXross(tamerId);
       await load();
       setStatus(direction === "up" ? "Partner Digivolved." : "Partner De-Digivolved.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not change the partner's evolution.");
     } finally { setBusy(false); }
+  }
+
+  async function clearArmyXross(tamerId: string) {
+    const response = await fetch("/api/player-tamers/army", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tamerId, clear: true }),
+    });
+    if (!response.ok) throw new Error("The partner changed form, but its Digixross could not be cleared.");
+  }
+
+  async function toggleArmyXross(tamerId: string, memberId: string) {
+    setBusy(true); setStatus("");
+    try {
+      const response = await fetch("/api/player-tamers/army", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tamerId, memberId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? "Could not update Digixross.");
+      await load();
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Could not update Digixross."); }
+    finally { setBusy(false); }
   }
 
   async function updateTamerTracker(id: string, field: "current_hp" | "current_partner_points" | "experience", value: number) {
@@ -634,7 +670,7 @@ export function TamerCreation(props: TamerCreationProps) {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tamerId: armyManager.tamerId,
-          members: armyManager.members.map(({ name, field_id, main_ability, stage, image_path }) => ({ name, field_id, main_ability, stage, image_path })),
+          members: armyManager.members.map(({ name, field_id, main_ability, stage, image_path, is_xrossed }) => ({ name, field_id, main_ability, stage, image_path, is_xrossed })),
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -703,22 +739,28 @@ export function TamerCreation(props: TamerCreationProps) {
       <div className="directory-toolbar"><label className="search-control"><span>Search characters</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name" /></label><span>{filtered.length} result{filtered.length === 1 ? "" : "s"}</span></div>
       {!loaded ? <div className="loading-state">Loading characters…</div> : filtered.length ? <div className="saved-digimon-list">{filtered.map((row) => {
         const id = String(row.id); const open = openId === id; const partners = [...(row.player_tamer_partners ?? [])].sort((a, b) => Number(a.slot_number) - Number(b.slot_number));
+        const tamerLevel = Number(row.level ?? 1);
+        const subclass = props.tamerSubclasses.find((item) => item.id === Number(row.subclass_id));
+        const isDigixrosser = subclass?.slug.toLowerCase() === "digixrosser";
+        const army = [...(row.player_tamer_army ?? [])].sort((a, b) => Number(a.slot_number) - Number(b.slot_number));
+        const xrossBonuses = isDigixrosser ? armyXrossBonuses(army) : {};
+        const partnerDigimon = (partner: PartnerRow | undefined) => asDigimon(
+          partner?.player_digimon, props, partners.indexOf(partner as PartnerRow) === 0 ? xrossBonuses : {},
+        );
         const proficiency = levelRow(Number(row.level)).proficiencyBonus;
-        const firstPartner = asDigimon(partners[0]?.player_digimon, props);
+        const firstPartner = partnerDigimon(partners[0]);
         const partnerCharisma = firstPartner
           ? firstPartner.charisma + (firstPartner.attributeHistory ?? []).reduce((total, name) => {
             const stageAttribute = props.attributes.find((item) => item.name.toLowerCase() === name.toLowerCase());
             return total + (stageAttribute?.statBuffs.some((buff) => buff.toLowerCase() === "charisma") ? 2 : 0);
           }, 0)
           : 10;
-        const secondPartner = asDigimon(partners[1]?.player_digimon, props);
+        const secondPartner = partnerDigimon(partners[1]);
         const secondPartnerCharisma = secondPartner
           ? secondPartner.charisma + (secondPartner.attributeHistory ?? []).reduce((total, name) => {
             const stageAttribute = props.attributes.find((item) => item.name.toLowerCase() === name.toLowerCase());
             return total + (stageAttribute?.statBuffs.some((buff) => buff.toLowerCase() === "charisma") ? 2 : 0);
           }, 0) : 10;
-        const tamerLevel = Number(row.level ?? 1);
-        const subclass = props.tamerSubclasses.find((item) => item.id === Number(row.subclass_id));
         const isDualWielder = subclass?.slug.toLowerCase() === "dual-wielder";
         const maxPp = dualWielderMaxPartnerPoints(Number(row.charisma), partnerCharisma, isDualWielder && secondPartner ? secondPartnerCharisma : undefined, tamerLevel);
         const trainings = trainingsFor(row);
@@ -729,8 +771,6 @@ export function TamerCreation(props: TamerCreationProps) {
           .some((value) => value.toLowerCase() === firstPartner?.field.toLowerCase()));
         const subclassFeatures = props.tamerSubclassFeatures.filter((feature) => feature.subclassId === subclass?.id);
         const featureLayout = SUBCLASS_SHEET_LAYOUTS[subclass?.slug.toLowerCase() ?? ""] ?? [];
-        const army = [...(row.player_tamer_army ?? [])].sort((a, b) => Number(a.slot_number) - Number(b.slot_number));
-        const isDigixrosser = subclass?.slug.toLowerCase() === "digixrosser";
         const isDigispirited = subclass?.slug.toLowerCase() === "digispirited";
         const isDnaPulser = subclass?.slug.toLowerCase() === "dna-pulser";
         const dnaConfig = dnaPulserConfig(row);
@@ -741,7 +781,7 @@ export function TamerCreation(props: TamerCreationProps) {
         const dualConfig = dualWielderConfig(row);
         const dualSpecial = dualConfig.special_skill ?? null;
         const partnerViews = partners.slice(0, 2).map((partner) => {
-          const digimon = asDigimon(partner.player_digimon, props);
+          const digimon = partnerDigimon(partner);
           const partnerLevel = Number(partner.player_digimon?.level ?? 1);
           const maximumHp = partnerMaximumHp(digimon, partnerLevel, props.attributes);
           const maximumDigislot = props.levels.find((item) => item.level === partnerLevel)?.digislot ?? 1;
@@ -753,7 +793,7 @@ export function TamerCreation(props: TamerCreationProps) {
           ? requestedActivePartnerId
           : String(partners[0]?.id ?? "");
         const activePartner = partners.find((partner) => String(partner.id) === activePartnerId) ?? partners[0];
-        const activePartnerDigimon = asDigimon(activePartner?.player_digimon, props);
+        const activePartnerDigimon = partnerDigimon(activePartner);
         const displayedPartners = isDualWielder || adaptedFatedEncounter
           ? partners.filter((partner) => String(partner.id) === activePartnerId)
           : partners;
@@ -779,10 +819,10 @@ export function TamerCreation(props: TamerCreationProps) {
               <div className="experience-trackers" aria-label="Experience trackers">
                 <label className="experience-tracker"><span>Tamer EXP</span><EditableNumber compact value={Number(row.experience ?? 0)} label={`${String(row.name)} experience`} onSave={(value) => updateTamerTracker(id, "experience", value)} /></label>
                 {partners.map((partner, index) => {
-                  const partnerDigimon = asDigimon(partner.player_digimon, props);
+                  const experienceDigimon = partnerDigimon(partner);
                   return <label className="experience-tracker partner-experience" key={`experience-${String(partner.id)}`}>
-                    <span>{partnerDigimon?.name ?? `Partner ${index + 1}`} EXP</span>
-                    <EditableNumber compact value={Number(partner.player_digimon?.experience ?? 0)} label={`${partnerDigimon?.name ?? `Partner ${index + 1}`} experience`} onSave={(value) => updateDigimonTracker(String(partner.player_digimon_id), "experience", value)} />
+                    <span>{experienceDigimon?.name ?? `Partner ${index + 1}`} EXP</span>
+                    <EditableNumber compact value={Number(partner.player_digimon?.experience ?? 0)} label={`${experienceDigimon?.name ?? `Partner ${index + 1}`} experience`} onSave={(value) => updateDigimonTracker(String(partner.player_digimon_id), "experience", value)} />
                   </label>;
                 })}
               </div>
@@ -823,18 +863,18 @@ export function TamerCreation(props: TamerCreationProps) {
               <div className="tamer-feats"><p>{equippedFeats.map((feat) => feat.name).join(" · ") || "—"}</p></div>
               <div className="tamer-proficiencies"><p>{tamerSkills.join(" · ") || "—"}</p></div>
               {isDigixrosser && <div className="digixrosser-army" aria-label={`${String(row.name)} Digimon Army`}>
-                {tamerLevel >= 9 && <div className="army-promoted-slots">{army.slice(0, 3).map((member, index) => <ArmySlot key={member.id ?? index} member={member} field={props.fields.find((field) => field.id === Number(member.field_id))} digimon={props.digimon} promoted inactive={index >= maxPp} />)}</div>}
+                {tamerLevel >= 9 && <div className="army-promoted-slots">{army.slice(0, 3).map((member, index) => <ArmySlot key={member.id ?? index} member={member} field={props.fields.find((field) => field.id === Number(member.field_id))} digimon={props.digimon} promoted inactive={index >= maxPp} busy={busy} onToggle={member.id ? () => void toggleArmyXross(id, member.id!) : undefined} />)}</div>}
                 <div className="army-standard-slots">{(tamerLevel >= 9 ? army.slice(3) : army).map((member, index) => {
                   const absoluteIndex = tamerLevel >= 9 ? index + 3 : index;
-                  return <ArmySlot key={member.id ?? absoluteIndex} member={member} field={props.fields.find((field) => field.id === Number(member.field_id))} digimon={props.digimon} inactive={absoluteIndex >= maxPp || member.stage !== "Rookie"} />;
+                  return <ArmySlot key={member.id ?? absoluteIndex} member={member} field={props.fields.find((field) => field.id === Number(member.field_id))} digimon={props.digimon} inactive={absoluteIndex >= maxPp || member.stage !== "Rookie"} busy={busy} onToggle={member.id ? () => void toggleArmyXross(id, member.id!) : undefined} />;
                 })}</div>
               </div>}
               {adaptedFatedEncounter && partners.length > 1 && <div className="adapted-partner-switcher" aria-label="Choose active partner">
                 {partners.slice(0, 2).map((partner) => {
-                  const partnerDigimon = asDigimon(partner.player_digimon, props);
+                  const switcherDigimon = partnerDigimon(partner);
                   return <button type="button" key={String(partner.id)} className={activePartnerId === String(partner.id) ? "active" : ""}
                     aria-pressed={activePartnerId === String(partner.id)} onClick={() => setActivePartnerByTamer((current) => ({ ...current, [id]: String(partner.id) }))}>
-                    {partnerDigimon?.image ? <img src={partnerDigimon.image} alt="" /> : null}<span>{partnerDigimon?.name ?? "Partner"}</span>
+                    {switcherDigimon?.image ? <img src={switcherDigimon.image} alt="" /> : null}<span>{switcherDigimon?.name ?? "Partner"}</span>
                   </button>;
                 })}
               </div>}
@@ -916,11 +956,12 @@ export function TamerCreation(props: TamerCreationProps) {
             </article>
             {partnerPicker === id && <section className="partner-picker"><div><h3>Add an existing Digimon</h3><div className="partner-choice-list">{props.account && <ExistingPartners tamer={row} onSelect={(digimonId) => void attach(id, { playerDigimonId: digimonId })} />}</div></div><div><h3>Copy from Monster Manual</h3><div className="partner-choice-list">{props.digimon.map((template) => <button key={template.id} disabled={busy} onClick={() => void attach(id, { official: officialPayload(template, Number(row.level)) })}><strong>{template.name}</strong><small>{template.stage}</small></button>)}</div></div></section>}
             {displayedPartners.map((partner) => {
-              const digimon = asDigimon(partner.player_digimon, props);
+              const digimon = partnerDigimon(partner);
               if (!digimon) return null;
               const bounds = STAGE_BOUNDS[digimon.stage.toLowerCase()] ?? [1, 20];
               const loadout = digimonLoadout(partner.player_digimon, props.items);
-              return <div className="tamer-partner" key={String(partner.id)}><MonsterManual {...props} digimon={[digimon]} initialSelectedSlug={digimon.slug} initialLevel={Number(partner.player_digimon?.level ?? bounds[0])} levelBounds={bounds} embedded hideLevelControl feats={[]}
+              const partnerFeats = digimonFeats(partner.player_digimon, props.feats);
+              return <div className="tamer-partner" key={String(partner.id)}><MonsterManual {...props} digimon={[digimon]} initialSelectedSlug={digimon.slug} initialLevel={Number(partner.player_digimon?.level ?? bounds[0])} levelBounds={bounds} embedded hideLevelControl feats={partnerFeats}
                 heldItems={loadout.heldItems} heldItemsTemplate={props.heldItemsTemplate}
                 enhancementItem={loadout.enhancementItem} enhancementItemsTemplate={props.enhancementItemsTemplate}
                 currentHp={partner.player_digimon?.current_hp == null ? null : Number(partner.player_digimon.current_hp)}
@@ -947,16 +988,16 @@ export function TamerCreation(props: TamerCreationProps) {
               </section>}
             {isDualWielder && expandedFeature?.tamerId === id && expandedFeature.slug === "double-landing" && dualSpecial && <section className="subclass-feature-details dual-special-details" aria-live="polite"><div><span className="eyebrow">Dual Wielder · Level 17</span><h3>{dualSpecial.name}</h3></div><p>{dualSpecial.description || "No description."}</p><div className="dual-special-stats"><span>{dualSpecial.time}</span><span>{dualSpecial.range}</span><span>{dualSpecial.power}</span><span>{dualSpecial.damage}</span><span>{dualSpecial.digislotCost} Digislot</span></div><button type="button" aria-label="Close Double Landing details" onClick={() => setExpandedFeature(null)}>×</button></section>}
             {partners.length > 0 && <section className="partner-management" aria-label="Partner management">{partners.map((partner, index) => {
-              const digimon = asDigimon(partner.player_digimon, props);
+              const digimon = partnerDigimon(partner);
               const canDedigivolve = Boolean(partner.player_digimon?.parent_digimon_id);
               const canDigivolve = Boolean(digimon) && digimon!.stage.toLowerCase() !== "7th stage";
-              return <div className="partner-controls" key={String(partner.id)}><strong>{digimon?.name ?? `Partner ${index + 1}`}</strong><button disabled={index === 0} onClick={() => void movePartner(id, partners, index, -1)}>↑</button><button disabled={index === partners.length - 1} onClick={() => void movePartner(id, partners, index, 1)}>↓</button>{canDedigivolve && <button className="dedigivolution-button" disabled={busy} onClick={() => void switchPartnerForm(id, partner, "down")}>De-Digivolve</button>}{canDigivolve && <button className="digivolution-button" disabled={busy} onClick={() => void switchPartnerForm(id, partner, "up")}>Digivolve</button>}<button className="partner-remove-button" onClick={() => void removePartner(String(partner.id))}>Remove</button></div>;
+              return <div className="partner-controls" key={String(partner.id)}><strong>{digimon?.name ?? `Partner ${index + 1}`}</strong><button disabled={index === 0} onClick={() => void movePartner(id, partners, index, -1)}>↑</button><button disabled={index === partners.length - 1} onClick={() => void movePartner(id, partners, index, 1)}>↓</button>{canDedigivolve && <button className="dedigivolution-button" disabled={busy} onClick={() => void switchPartnerForm(id, partner, "down")}>De-Digivolve</button>}{canDigivolve && <button className="digivolution-button" disabled={busy} onClick={() => void switchPartnerForm(id, partner, "up")}>Digivolve</button>}<button className="edit-digimon-link" disabled={busy || !partner.player_digimon_id} onClick={() => props.onEditPartner(String(partner.player_digimon_id))}>Edit</button><button className="partner-remove-button" onClick={() => void removePartner(String(partner.id))}>Remove</button></div>;
             })}</section>}
             <section className="combined-proficiencies saving-throw-table"><h3>Saving Throws</h3><div className="proficiency-groups saving-throw-groups">{ABILITIES.map((ability) => <article className="proficiency-group" key={ability}>
               <h4>{ability.slice(0, 3).toUpperCase()}</h4>
               <div className="compact-skill-row"><strong>{String(row.name)}</strong><span>{signed(modifier(Number(row[ability])) + (tamerSaves.some((save) => save.toLowerCase() === ability.toLowerCase()) ? proficiency : 0))}</span></div>
               {partners.map((partner, index) => {
-                const digimon = asDigimon(partner.player_digimon, props);
+                const digimon = partnerDigimon(partner);
                 const partnerProf = digimonProficiency(Number(partner.player_digimon?.level ?? 1), props.levels);
                 const trained = digimon?.savingThrows.some((save) => save.toLowerCase() === ability.toLowerCase());
                 return <div className="compact-skill-row" key={String(partner.id)}><strong>{digimon?.name ?? `Partner ${index + 1}`}</strong><span style={{ color: fieldColor(props.fields.find((field) => field.abbreviation === digimon?.field)) }}>{signed(modifier(digimon?.[ability] ?? 10) + (trained ? partnerProf : 0))}</span></div>;
@@ -967,14 +1008,14 @@ export function TamerCreation(props: TamerCreationProps) {
               return <article className="proficiency-group" key={ability}><h4>{label}</h4>{groupedSkills.map((skill) => {
                 const tamerValue = modifier(Number(row[ability])) + (tamerSkills.includes(skill) ? proficiency : 0);
                 return <div className="compact-skill-row" key={skill}><strong>{skill}</strong><span title={String(row.name)}>{signed(tamerValue)}</span>{partners.map((partner) => {
-                  const digimon = asDigimon(partner.player_digimon, props);
+                  const digimon = partnerDigimon(partner);
                   const partnerProf = digimonProficiency(Number(partner.player_digimon?.level ?? 1), props.levels);
                   const value = modifier(digimon?.[ability] ?? 10) + (digimon?.proficiencies.includes(skill) ? partnerProf : 0);
                   return <span key={String(partner.id)} title={digimon?.name} style={{ color: fieldColor(props.fields.find((field) => field.abbreviation === digimon?.field)) }}>{signed(value)}</span>;
                 })}</div>;
               })}</article>;
             })}</div><div className="proficiency-legend"><span><i />{String(row.name)}</span>{partners.map((partner) => {
-              const digimon = asDigimon(partner.player_digimon, props);
+              const digimon = partnerDigimon(partner);
               const color = fieldColor(props.fields.find((field) => field.abbreviation === digimon?.field));
               return <span key={String(partner.id)} style={{ color }}><i style={{ background: color }} />{digimon?.name}</span>;
             })}</div></section>
@@ -1189,13 +1230,15 @@ function ArmyPortrait({ src }: { src?: string | null }) {
   return <img className="army-digimon-image" src={src} alt="" onError={() => setFailed(true)} />;
 }
 
-function ArmySlot({ member, field, digimon, promoted = false, inactive = false }: { member: ArmyMember; field?: Field; digimon: Digimon[]; promoted?: boolean; inactive?: boolean }) {
+function ArmySlot({ member, field, digimon, promoted = false, inactive = false, busy = false, onToggle }: { member: ArmyMember; field?: Field; digimon: Digimon[]; promoted?: boolean; inactive?: boolean; busy?: boolean; onToggle?: () => void }) {
   const officialImage = digimon.find((candidate) => candidate.name.trim().toLowerCase() === member.name.trim().toLowerCase())?.image;
-  return <div className={`army-slot${promoted ? " promoted" : ""}${inactive ? " inactive" : ""}`} aria-label={`${member.main_ability.slice(0, 3).toUpperCase()} ${field?.name ?? "Unknown Field"}`}>
+  return <button type="button" className={`army-slot${promoted ? " promoted" : ""}${inactive ? " inactive" : ""}${member.is_xrossed ? " xrossed" : ""}`}
+    aria-label={`${member.is_xrossed ? "Un-Xross" : "Xross"} ${member.name}`} aria-pressed={Boolean(member.is_xrossed)}
+    title={`${member.is_xrossed ? "Un-Xross" : "Xross"} ${member.name}`} disabled={inactive || busy || !onToggle} onClick={onToggle}>
     <ArmyPortrait src={member.image_path || officialImage} />
     <strong>{member.main_ability.slice(0, 3).toUpperCase()}</strong>
     <span className="army-field-symbol">{field?.symbol ? <img src={field.symbol} alt="" /> : "?"}</span>
-  </div>;
+  </button>;
 }
 
 function ArmyManager({ state, fields, digimon, busy, onChange, onCancel, onSave }: {

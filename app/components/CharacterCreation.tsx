@@ -66,9 +66,9 @@ function capitalize(value: string) {
 
 function attachmentDamageMode(skill?: AttachmentSkill) {
   const damage = skill?.damage?.trim() ?? "";
-  if (damage === "-") return "none";
+  if (/\d+d\d+/i.test(damage)) return "type";
   if (/^\d+$/.test(damage)) return "power";
-  return "type";
+  return "none";
 }
 
 function savedStageMinimum(stageName: string, stages: DigimonStage[]) {
@@ -962,7 +962,15 @@ export function CharacterCreation(props: {
       <button role="tab" aria-selected={tab === "characters"} onClick={() => setTab("characters")}>Characters</button>
       <button role="tab" aria-selected={tab === "digimon"} onClick={() => setTab("digimon")}>Digimon</button>
     </div>
-    {tab === "characters" ? <TamerCreation {...props} account={account} authLoading={authLoading} onDigivolvePartner={(playerDigimonId, tamerId, partnerId) => {
+    {tab === "characters" ? <TamerCreation {...props} account={account} authLoading={authLoading} onEditPartner={(playerDigimonId) => {
+      const row = saved.find((candidate) => String(candidate.id) === playerDigimonId);
+      if (!row) { setStatus("Could not find that saved partner."); return; }
+      const rootId = evolutionRootId(row);
+      setTab("digimon");
+      setActiveEvolutionByRoot((current) => ({ ...current, [rootId]: playerDigimonId }));
+      setSelectedSavedId(rootId);
+      editSavedDigimon(row);
+    }} onDigivolvePartner={(playerDigimonId, tamerId, partnerId) => {
       const row = saved.find((candidate) => String(candidate.id) === playerDigimonId);
       if (!row) { setStatus("Could not find that saved partner."); return; }
       const rootId = evolutionRootId(row);

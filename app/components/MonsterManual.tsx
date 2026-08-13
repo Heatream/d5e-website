@@ -6,11 +6,45 @@ import {
   formatPower, resolveSkillStage, skillStageValue, type AttachmentSkill, type Attribute,
   type Digimon, type Feat, type Field, type Item, type LevelChart, type PersonalitySkill, type TypeElement,
 } from "../lib/supabase";
-import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, stageRange } from "../lib/digimon-rules";
+import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, proficiencyNumber, stageRange } from "../lib/digimon-rules";
 import { itemAbilityBonuses } from "../lib/item-rules";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
+
+const powerAliases: Record<string, Ability> = {
+  str: "strength", strength: "strength", dex: "dexterity", dexterity: "dexterity",
+  con: "constitution", constitution: "constitution", int: "intelligence", intelligence: "intelligence",
+  wis: "wisdom", wisdom: "wisdom", cha: "charisma", charisma: "charisma",
+};
+const attachmentSaveSlugs = new Set(["crush-hammer", "pressure-blaster", "crescent-edge"]);
+const attachmentHealingSlugs = new Set(["heal", "aura"]);
+
+function bestPowerModifier(power: string | null | undefined, stats: Record<Ability, number>) {
+  const abilities = String(power ?? "").toLowerCase().split(/[,/]|\bor\b/)
+    .map((value) => powerAliases[value.trim()])
+    .filter((value): value is Ability => Boolean(value));
+  return abilities.length ? Math.max(...abilities.map((ability) => modifier(stats[ability]))) : 0;
+}
+
+function damageWithModifier(damage: string | null | undefined, powerModifier: number) {
+  const clean = String(damage ?? "—").trim() || "—";
+  if (/^dc\b/i.test(clean)) return "—";
+  return /^\d+d\d+$/i.test(clean) && powerModifier !== 0
+    ? `${clean}${powerModifier > 0 ? "+" : ""}${powerModifier}`
+    : clean;
+}
+
+function attachmentUsesAttackRoll(skill: AttachmentSkill, damage: string) {
+  return /^\d+d\d+$/i.test(damage.trim())
+    && !attachmentSaveSlugs.has(skill.slug.toLowerCase())
+    && !attachmentHealingSlugs.has(skill.slug.toLowerCase());
+}
+
+function specialUsesAttackRoll(hitType: string | null | undefined) {
+  const normalized = String(hitType ?? "").toLowerCase();
+  return normalized.includes("attack") || normalized.includes("1d20");
+}
 
 function validType(value: unknown, types: TypeElement[]) {
   if (typeof value !== "string") return null;
@@ -230,6 +264,22 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
   const expandedSpecial = expandedSpecialIndex === null ? null : specialSkills[expandedSpecialIndex] ?? null;
   const expandedSpecialType = expandedSpecial ? validType(expandedSpecial.type, types) : null;
   const expandedEntry = view?.attachmentSkills.find((entry) => entry?.ref.slot === expandedSkillSlot && entry.skill);
+  const expandedAttachmentModifier = expandedEntry && view ? bestPowerModifier(expandedEntry.power, view.stats) : 0;
+  const expandedAttachmentDc = expandedEntry && view
+    ? calculateSkillDc(expandedEntry.power, view.levelRow?.proficiency, view.stats, expandedEntry.stage)
+    : 0;
+  const expandedAttachmentDamage = expandedEntry ? damageWithModifier(expandedEntry.damage, expandedAttachmentModifier) : "—";
+  const expandedAttachmentToHit = expandedEntry?.skill && view && attachmentUsesAttackRoll(expandedEntry.skill, expandedEntry.damage)
+    ? expandedAttachmentModifier + proficiencyNumber(view.levelRow?.proficiency)
+    : null;
+  const expandedSpecialModifier = expandedSpecial && view ? bestPowerModifier(expandedSpecial.power, view.stats) : 0;
+  const expandedSpecialDc = expandedSpecial && view
+    ? calculateSkillDc(expandedSpecial.power, view.levelRow?.proficiency, view.stats, expandedSpecial.stage ?? 1)
+    : 0;
+  const expandedSpecialDamage = expandedSpecial ? damageWithModifier(expandedSpecial.damage, expandedSpecialModifier) : "—";
+  const expandedSpecialToHit = expandedSpecial && view && specialUsesAttackRoll(expandedSpecial.hitType)
+    ? expandedSpecialModifier + proficiencyNumber(view.levelRow?.proficiency)
+    : null;
   const abilityOrder: Ability[] = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"];
 
   const selectedContent = selected && view ? (
@@ -332,28 +382,27 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <dl className="manual-skill-stats special-skill-stats">
           <div><dt>Power</dt><dd>{formatPower(expandedSpecial.power)}</dd></div>
           <div><dt>Time</dt><dd>{expandedSpecial.time}</dd></div>
-          <div><dt>Damage</dt><dd>{expandedSpecial.damage}</dd></div>
           <div><dt>Range</dt><dd>{expandedSpecial.range}</dd></div>
           <div><dt>Target</dt><dd>{expandedSpecial.target}</dd></div>
           <div><dt>Hit Type</dt><dd>{expandedSpecial.hitType}</dd></div>
           <div><dt>Critical</dt><dd>{expandedSpecial.critical}</dd></div>
           <div><dt>Digislot</dt><dd>{expandedSpecial.digislotCost === "—" ? "—" : `${expandedSpecial.digislotCost} ${expandedSpecial.digislotCost === "1" ? "slot" : "slots"}`}</dd></div>
         </dl>
+        <dl className="manual-combat-stats" aria-label="Special Skill combat values"><div><dt>Damage</dt><dd>{expandedSpecialDamage}</dd></div><div><dt>DC</dt><dd>{expandedSpecialDc}</dd></div>{expandedSpecialToHit !== null && <div><dt>To Hit</dt><dd>{expandedSpecialToHit >= 0 ? "+" : ""}{expandedSpecialToHit}</dd></div>}</dl>
         {expandedSpecial.effects?.length ? <div className="special-skill-effects"><strong>Effects</strong><ul>{expandedSpecial.effects.map((effect) => <li key={effect}>{effect}</li>)}</ul></div> : null}
         {expandedSpecial.description && <p>{expandedSpecial.description}</p>}
       </section>}
       {expandedEntry?.skill && <section className="manual-skill-details" id={`manual-skill-details-${selected.slug}`} aria-live="polite">
-        <div className="manual-skill-title"><div><span className="eyebrow">Attachment Skill</span><h3>{expandedEntry.type ? `${expandedEntry.type.name} ${expandedEntry.skill.name}` : expandedEntry.skill.name}</h3></div><button type="button" onClick={() => setExpandedSkillSlot(null)} aria-label="Close skill details">×</button></div>
+        <div className="manual-skill-title attachment-skill-title"><div><span className="eyebrow">Attachment Skill</span><h3>{expandedEntry.type ? `${expandedEntry.type.name} ${expandedEntry.skill.name}` : expandedEntry.skill.name}</h3></div>{expandedEntry.type && <div className="special-type-summary"><strong>{expandedEntry.type.name} Type</strong><span>{expandedEntry.type.effect}</span></div>}<button type="button" onClick={() => setExpandedSkillSlot(null)} aria-label="Close skill details">×</button></div>
         <dl className="manual-skill-stats">
           <div><dt>Stage</dt><dd>{expandedEntry.stage === 1 ? "I" : expandedEntry.stage === 2 ? "II" : "III"}</dd></div>
           <div><dt>Power</dt><dd>{formatPower(expandedEntry.power)}</dd></div>
           <div><dt>Time</dt><dd>{expandedEntry.skill.time}</dd></div>
-          <div><dt>Damage / DC</dt><dd>{expandedEntry.damage}</dd></div>
           <div><dt>Range</dt><dd>{expandedEntry.skill.range}</dd></div>
           <div><dt>Duration</dt><dd>{expandedEntry.skill.duration}</dd></div>
         </dl>
+        <dl className="manual-combat-stats" aria-label="Attachment Skill combat values"><div><dt>Damage</dt><dd>{expandedAttachmentDamage}</dd></div><div><dt>DC</dt><dd>{expandedAttachmentDc}</dd></div>{expandedAttachmentToHit !== null && <div><dt>To Hit</dt><dd>{expandedAttachmentToHit >= 0 ? "+" : ""}{expandedAttachmentToHit}</dd></div>}</dl>
         <p>{expandedEntry.skill.description}</p>
-        {expandedEntry.type && <div className="manual-type-effect"><strong>{expandedEntry.type.name} Type</strong><p>{expandedEntry.type.effect}</p></div>}
       </section>}
     </section>
   ) : null;

@@ -7,7 +7,7 @@ import {
   addMatchingDice, resolveStoredSpecialDamage, selectedChoiceKeys, toggleMultiChoice,
 } from "../app/lib/special-skill-rules.ts";
 import { digidestinedSummary } from "../app/lib/tamer-rules.ts";
-import { allowedArmyStages, armyCapacity } from "../app/lib/digixrosser-rules.ts";
+import { allowedArmyStages, armyCapacity, armyStageRank, armyXrossBonus, armyXrossBonuses } from "../app/lib/digixrosser-rules.ts";
 import { digispiritedRange, digispiritedUnarmedDamage, resolveDigispiritedFieldId } from "../app/lib/digispirited-rules.ts";
 import { doubleLandingBudget, dualWielderMaxPartnerPoints, fieldSyncSummary, jogressCurrentHp } from "../app/lib/dual-wielder-rules.ts";
 import { DNA_ADAPTATION_FEATURE_SLUGS, dnaPulserSummary, dnaPulserSummaryLines } from "../app/lib/dna-pulser-rules.ts";
@@ -53,6 +53,14 @@ test("enforces Digixrosser Army capacity and promoted stages", () => {
   assert.deepEqual(allowedArmyStages(9, "Mega", 2), ["Rookie", "Champion", "Ultimate"]);
   assert.deepEqual(allowedArmyStages(9, "Mega", 3), ["Rookie"]);
   assert.deepEqual(allowedArmyStages(17, "7th Stage", 0), ["Rookie", "Champion", "Ultimate", "Mega"]);
+  assert.equal(armyStageRank("Champion"), 2);
+  assert.equal(armyXrossBonus("Champion"), 10);
+  assert.equal(armyXrossBonus("7th Stage"), 25);
+  assert.deepEqual(armyXrossBonuses([
+    { main_ability: "strength", stage: "Champion", is_xrossed: true },
+    { main_ability: "strength", stage: "Rookie", is_xrossed: true },
+    { main_ability: "wisdom", stage: "Mega", is_xrossed: false },
+  ]), { strength: 15 });
 });
 
 test("resolves Digidestined sheet summaries and Tamer Command upgrades", () => {

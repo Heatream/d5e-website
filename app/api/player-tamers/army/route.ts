@@ -7,6 +7,7 @@ type ArmyMemberPayload = {
   main_ability?: string;
   stage?: string;
   image_path?: string | null;
+  is_xrossed?: boolean;
 };
 
 const ABILITIES = new Set(["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]);
@@ -25,6 +26,7 @@ export async function PUT(request: NextRequest) {
     main_ability: String(member.main_ability ?? "").toLowerCase(),
     stage: String(member.stage ?? ""),
     image_path: String(member.image_path ?? "").trim() || null,
+    is_xrossed: Boolean(member.is_xrossed),
   }));
   if (members.some((member) => !member.name || !Number.isInteger(member.field_id)
     || !ABILITIES.has(member.main_ability) || !STAGES.has(member.stage))) {
@@ -51,5 +53,24 @@ export async function PUT(request: NextRequest) {
         : "Could not save the Digimon Army.";
     return sessionResponse(session, { error }, { status: 409 });
   }
+  return sessionResponse(session, result);
+}
+
+export async function PATCH(request: NextRequest) {
+  const session = await requireSession(request);
+  if (!session) return NextResponse.json({ error: "A permanent account is required." }, { status: 401 });
+  const body = await request.json().catch(() => null) as { tamerId?: string; memberId?: string; clear?: boolean } | null;
+  if (!body?.tamerId || (!body.memberId && !body.clear)) {
+    return sessionResponse(session, { error: "Invalid Digixross request." }, { status: 400 });
+  }
+  const { url, publishableKey } = authConfig();
+  const response = await fetch(`${url}/rest/v1/rpc/update_tamer_army_xross`, {
+    method: "POST",
+    headers: { apikey: publishableKey, Authorization: `Bearer ${session.accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ target_tamer_id: body.tamerId, target_member_id: body.memberId ?? null, clear_all: Boolean(body.clear) }),
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => []);
+  if (!response.ok) return sessionResponse(session, { error: "Could not update Digixross." }, { status: 409 });
   return sessionResponse(session, result);
 }

@@ -57,6 +57,22 @@ async function replaceChildren(
   return null;
 }
 
+async function clearSubclassState(url: string, headers: Record<string, string>, tamerId: string) {
+  const resources = [
+    "player_tamer_army",
+    "player_tamer_digispirited",
+    "player_tamer_dual_wielder",
+    "player_tamer_dna_pulser",
+  ];
+  for (const resource of resources) {
+    const response = await fetch(`${url}/rest/v1/${resource}?tamer_id=eq.${encodeURIComponent(tamerId)}`, {
+      method: "DELETE", headers: { ...headers, Prefer: "return=minimal" }, cache: "no-store",
+    });
+    if (!response.ok) return response;
+  }
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   const authenticated = await auth(request);
   if (!authenticated) return NextResponse.json({ error: "A permanent account is required." }, { status: 401 });
@@ -66,7 +82,7 @@ export async function GET(request: NextRequest) {
     "player_tamer_trainings(id,training_kind,name)",
     "player_tamer_feats(id,feat_id)",
     "player_tamer_items(id,item_id,custom_name,custom_description,quantity,created_at)",
-    "player_tamer_army(id,slot_number,name,field_id,main_ability,stage,image_path,created_at,updated_at)",
+    "player_tamer_army(id,slot_number,name,field_id,main_ability,stage,image_path,is_xrossed,created_at,updated_at)",
     "player_tamer_digispirited(tamer_id,selected_field_id,weapon_name,weapon_damage,weapon_power,weapon_range,weapon_damage_type,elemental_type_id)",
     "player_tamer_dual_wielder(tamer_id,special_skill,builder_choices)",
     "player_tamer_dna_pulser(tamer_id,adapted_feature_id)",
@@ -78,26 +94,33 @@ export async function GET(request: NextRequest) {
   const result = await response.json().catch(() => []);
   if (!response.ok || !Array.isArray(result)) return sessionResponse(session, result, { status: response.status });
 
-  // Item loadouts belong to the root of an evolution chain. Hydrate each attached
-  // form with that shared loadout so tamer-sheet calculations use the same items.
-  const digimonResponse = await fetch(`${url}/rest/v1/player_digimon?select=id,parent_digimon_id,player_digimon_items(slot_number,item_id)`, {
+  // Items and feats belong to the root of an evolution chain. Hydrate each
+  // attached form with that shared progression before returning the tamer.
+  const digimonResponse = await fetch(`${url}/rest/v1/player_digimon?select=id,parent_digimon_id,player_digimon_items(slot_number,item_id),player_digimon_feats(feat_id)`, {
     headers, cache: "no-store",
   });
   const digimonRows = await digimonResponse.json().catch(() => []);
   if (digimonResponse.ok && Array.isArray(digimonRows)) {
     const byId = new Map(digimonRows.map((row) => [String(row.id), row]));
-    const rootItems = (id: string) => {
+    const rootProgression = (id: string) => {
       let current = byId.get(id);
       const visited = new Set<string>();
       while (current?.parent_digimon_id && !visited.has(String(current.id))) {
         visited.add(String(current.id));
         current = byId.get(String(current.parent_digimon_id)) ?? current;
       }
-      return Array.isArray(current?.player_digimon_items) ? current.player_digimon_items : [];
+      return {
+        items: Array.isArray(current?.player_digimon_items) ? current.player_digimon_items : [],
+        feats: Array.isArray(current?.player_digimon_feats) ? current.player_digimon_feats : [],
+      };
     };
     result.forEach((tamer) => (tamer.player_tamer_partners ?? []).forEach((partner: Record<string, unknown>) => {
       const playerDigimon = partner.player_digimon as Record<string, unknown> | null;
-      if (playerDigimon) playerDigimon.player_digimon_items = rootItems(String(playerDigimon.id));
+      if (playerDigimon) {
+        const progression = rootProgression(String(playerDigimon.id));
+        playerDigimon.player_digimon_items = progression.items;
+        playerDigimon.player_digimon_feats = progression.feats;
+      }
     }));
   }
   return sessionResponse(session, result, { status: response.status });
@@ -149,6 +172,15 @@ export async function PATCH(request: NextRequest) {
     return sessionResponse(session, result[0]);
   }
   if (!body?.id || !validBody(body)) return sessionResponse(session, { error: "Invalid tamer data." }, { status: 400 });
+  const previousResponse = await fetch(`${url}/rest/v1/player_tamers?id=eq.${encodeURIComponent(body.id)}&select=subclass_id&limit=1`, {
+    headers, cache: "no-store",
+  });
+  const previousRows = await previousResponse.json().catch(() => []);
+  if (!previousResponse.ok || !previousRows[0]) {
+    return sessionResponse(session, { error: "Could not load the existing tamer." }, { status: previousResponse.status || 404 });
+  }
+  const previousSubclassId = previousRows[0].subclass_id == null ? "" : String(previousRows[0].subclass_id);
+  const nextSubclassId = body.tamer.subclass_id == null ? "" : String(body.tamer.subclass_id);
   const response = await fetch(`${url}/rest/v1/player_tamers?id=eq.${encodeURIComponent(body.id)}`, {
     method: "PATCH", headers,
     body: JSON.stringify({ ...body.tamer, user_id: session.user.id, updated_at: new Date().toISOString() }), cache: "no-store",
@@ -159,6 +191,13 @@ export async function PATCH(request: NextRequest) {
   if (childError) {
     const error = await childError.json().catch(() => ({}));
     return sessionResponse(session, { error: error?.message ?? "Could not update tamer selections." }, { status: childError.status });
+  }
+  if (previousSubclassId !== nextSubclassId) {
+    const subclassError = await clearSubclassState(url, headers, body.id);
+    if (subclassError) {
+      const error = await subclassError.json().catch(() => ({}));
+      return sessionResponse(session, { error: error?.message ?? "The tamer was updated, but old subclass data could not be cleared." }, { status: subclassError.status });
+    }
   }
   return sessionResponse(session, result[0]);
 }
