@@ -156,7 +156,7 @@ export async function PATCH(request: NextRequest) {
   const { url, headers, session } = authenticated;
   const body = await request.json().catch(() => null) as TamerPayload | null;
   if (body?.id && body.tamer && !body.trainings && !body.featIds && !body.items) {
-    const allowed = ["current_hp", "current_partner_points", "experience"] as const;
+    const allowed = ["current_hp", "current_partner_points", "experience", "money"] as const;
     const quick = Object.fromEntries(
       allowed
         .filter((key) => Object.prototype.hasOwnProperty.call(body.tamer, key))

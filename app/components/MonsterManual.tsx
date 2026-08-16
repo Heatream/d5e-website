@@ -8,6 +8,7 @@ import {
 } from "../lib/supabase";
 import { calculateHistoryHp, calculateHp, calculateMovement, calculateSkillDc, modifier, normalizeStage, proficiencyNumber, stageRange } from "../lib/digimon-rules";
 import { itemAbilityBonuses } from "../lib/item-rules";
+import { parseTrackerExpression } from "../lib/tracker-expression";
 
 const GENERIC_IMAGE = "https://aboaavhsrjmecqyjoaek.supabase.co/storage/v1/object/public/D5e%20Assets/assets/symbols/Generic%20Symbol.png";
 type Ability = "strength" | "dexterity" | "constitution" | "intelligence" | "wisdom" | "charisma";
@@ -92,14 +93,19 @@ function InlineTracker({ value, maximum, label, onSave }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   async function commit() {
-    const next = Math.max(0, Math.min(maximum ?? Number.MAX_SAFE_INTEGER, Math.trunc(Number(draft) || 0)));
+    const calculated = parseTrackerExpression(draft, value);
+    const next = calculated == null
+      ? value
+      : Math.max(0, Math.min(maximum ?? Number.MAX_SAFE_INTEGER, calculated));
     setEditing(false);
+    setDraft(String(next));
     if (next !== value) await onSave?.(next);
   }
   if (!onSave) return <strong>{value}</strong>;
   return editing
-    ? <input className="sheet-inline-number" type="number" min="0" max={maximum} value={draft} autoFocus
+    ? <input className="sheet-inline-number" type="text" inputMode="numeric" value={draft} autoFocus
       aria-label={label} onChange={(event) => setDraft(event.target.value)}
+      onFocus={(event) => event.currentTarget.select()}
       onBlur={() => void commit()} onKeyDown={(event) => {
         if (event.key === "Enter") void commit();
         if (event.key === "Escape") { setDraft(String(value)); setEditing(false); }
@@ -146,7 +152,7 @@ function useAutoFitText(dependencies: unknown[]) {
   return sheetRef;
 }
 
-export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, hideLevelControl = false, heldItems = [], heldItemsTemplate, enhancementItem = null, enhancementItemsTemplate, feats = [], currentHp, onCurrentHpChange, onEdit, onDelete, onDigivolve, onDedigivolve, onManageArmy, onManageFeats, onManageItems }: {
+export function MonsterManual({ digimon, fields, attributes, levels, skills, types, personalitySkills, initialSelectedSlug = "", initialLevel, levelBounds, embedded = false, hideLevelControl = false, heldItems = [], heldItemsTemplate, enhancementItem = null, enhancementItemsTemplate, feats = [], currentHp, onCurrentHpChange, currentDigislot, onCurrentDigislotChange, onProficiencyClick, onEdit, onDelete, onDigivolve, onDedigivolve, onManageArmy, onManageFeats, onManageItems }: {
   digimon: Digimon[]; fields: Field[]; attributes: Attribute[]; levels: LevelChart[];
   skills: AttachmentSkill[]; types: TypeElement[]; personalitySkills: PersonalitySkill[];
   initialSelectedSlug?: string; initialLevel?: number; levelBounds?: [number, number]; embedded?: boolean; hideLevelControl?: boolean;
@@ -154,6 +160,8 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
   enhancementItem?: Item | null; enhancementItemsTemplate?: string | null;
   feats?: Feat[];
   currentHp?: number | null; onCurrentHpChange?: (value: number) => Promise<void> | void;
+  currentDigislot?: number | null; onCurrentDigislotChange?: (value: number) => Promise<void> | void;
+  onProficiencyClick?: () => void;
   onEdit?: () => void; onDelete?: () => void; onDigivolve?: () => void; onDedigivolve?: () => void; onManageArmy?: () => void; onManageFeats?: () => void; onManageItems?: () => void;
 }) {
   const [selectedSlug, setSelectedSlug] = useState(initialSelectedSlug);
@@ -310,7 +318,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
         <div className="print-hp"><small>{view.hitDie}</small><InlineTracker value={currentHp ?? view.hp} maximum={view.hp} label={`${selected.name} current HP`} onSave={onCurrentHpChange} /></div>
         <div className="print-ac"><span>{view.ac}</span></div>
         <div className="print-prof"><span>{view.levelRow?.proficiency ?? "+2"}</span></div>
-        <div className="print-dl"><strong>{view.levelRow?.digislot ?? 1}</strong></div>
+        <div className="print-dl"><InlineTracker value={currentDigislot ?? view.levelRow?.digislot ?? 1} maximum={view.levelRow?.digislot ?? 1} label={`${selected.name} current Digislot`} onSave={onCurrentDigislotChange} /></div>
         <div className="print-speed"><strong>{view.movement}<small>ft</small></strong></div>
         {view.attribute?.image && <img className="print-attribute" src={view.attribute.image} alt={`${selected.attribute} attribute`} />}
         <div className="print-abilities">{abilityOrder.map((ability) => <div key={ability}><strong>{view.stats[ability]}</strong></div>)}</div>
@@ -339,7 +347,7 @@ export function MonsterManual({ digimon, fields, attributes, levels, skills, typ
             </button>;
           }) : <p>No attachment skills unlocked.</p>}
         </div>
-        <div className="print-proficiencies" data-fit><p>{selected.proficiencies.join(" · ") || "—"}</p></div>
+        {onProficiencyClick ? <button type="button" className="print-proficiencies proficiency-square-button" data-fit onClick={onProficiencyClick} aria-label={`Open ${selected.name} proficiency table`}><p>{selected.proficiencies.join(" · ") || "—"}</p></button> : <div className="print-proficiencies" data-fit><p>{selected.proficiencies.join(" · ") || "—"}</p></div>}
         <div className="print-saves" data-fit><p>{selected.savingThrows.length ? selected.savingThrows.slice(0, view.levelRow?.savingThrows ?? 1).map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
         <div className="print-weaknesses" data-fit><p>{selected.weakness.length ? selected.weakness.map((value) => <span key={value}>{value}</span>) : "—"}</p></div>
         <div className="print-personality" data-fit><h3>{view.personality || "Personality"}{view.skillName ? ` · ${view.skillName}` : ""}</h3><p>{view.personalitySkill?.description ?? (view.skillName ? "Description unavailable." : "—")}</p></div>

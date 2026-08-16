@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const upcoming = ["Encounter Manager", "Rules"];
+const upcoming = ["Rules"];
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -27,6 +27,7 @@ export function SiteHeader() {
           <Link className={`nav-link ${pathname.startsWith("/character-creation") ? "active" : ""}`} href="/character-creation" aria-current={pathname.startsWith("/character-creation") ? "page" : undefined}>
             Character Creation
           </Link>
+          <Link className={`nav-link ${pathname.startsWith("/encounter-manager") ? "active" : ""}`} href="/encounter-manager" aria-current={pathname.startsWith("/encounter-manager") ? "page" : undefined}>Encounter Manager</Link>
           {upcoming.map((item) => (
             <span className="nav-link disabled" aria-disabled="true" key={item}>
               {item}

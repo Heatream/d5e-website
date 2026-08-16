@@ -14,6 +14,7 @@ import { digispiritedRange, digispiritedUnarmedDamage, resolveDigispiritedFieldI
 import { doubleLandingBudget, dualWielderMaxPartnerPoints, fieldSyncSummary, jogressCurrentHp } from "../lib/dual-wielder-rules";
 import { DNA_ADAPTATION_FEATURE_SLUGS, dnaPulserSummary, dnaPulserSummaryLines } from "../lib/dna-pulser-rules";
 import { itemAbilityBonuses } from "../lib/item-rules";
+import { parseTrackerExpression } from "../lib/tracker-expression";
 
 type Account = { username: string; rootCount: number; limit: number; limitUnlocked: boolean };
 type Training = { training_kind: "skill" | "save"; name: string };
@@ -201,12 +202,17 @@ function EditableNumber({ value, maximum, label, onSave, compact = false }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   async function commit() {
-    const next = Math.max(0, Math.min(maximum ?? Number.MAX_SAFE_INTEGER, Math.trunc(Number(draft) || 0)));
+    const parsed = parseTrackerExpression(draft, value);
+    const next = parsed == null
+      ? value
+      : Math.max(0, Math.min(maximum ?? Number.MAX_SAFE_INTEGER, parsed));
+    setDraft(String(next));
     setEditing(false);
     if (next !== value) await onSave(next);
   }
-  if (editing) return <input className={`tracker-input${compact ? " compact" : ""}`} type="number" min="0" max={maximum}
+  if (editing) return <input className={`tracker-input${compact ? " compact" : ""}`} type="text" inputMode="numeric"
     aria-label={label} value={draft} autoFocus onChange={(event) => setDraft(event.target.value)}
+    onFocus={(event) => event.currentTarget.select()}
     onBlur={() => void commit()} onKeyDown={(event) => {
       if (event.key === "Enter") void commit();
       if (event.key === "Escape") { setDraft(String(value)); setEditing(false); }
@@ -563,24 +569,32 @@ export function TamerCreation(props: TamerCreationProps) {
     finally { setBusy(false); }
   }
 
-  async function updateTamerTracker(id: string, field: "current_hp" | "current_partner_points" | "experience", value: number) {
+  async function updateTamerTracker(id: string, field: "current_hp" | "current_partner_points" | "experience" | "money", value: number) {
+    const previous = rows;
+    setRows((current) => current.map((row) => String(row.id) === id ? { ...row, [field]: value } : row));
     const response = await fetch("/api/player-tamers", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, tamer: { [field]: value } }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) { setStatus(result.error ?? "Could not update the tracker."); return; }
-    await load();
+    if (!response.ok) { setRows(previous); setStatus(result.error ?? "Could not update the tracker."); }
   }
 
   async function updateDigimonTracker(id: string, field: "current_hp" | "current_digislot" | "experience", value: number) {
+    const previous = rows;
+    setRows((current) => current.map((row) => ({
+      ...row,
+      player_tamer_partners: (row.player_tamer_partners ?? []).map((partner) =>
+        String(partner.player_digimon_id) === id && partner.player_digimon
+          ? { ...partner, player_digimon: { ...partner.player_digimon, [field]: value } }
+          : partner),
+    })));
     const response = await fetch("/api/player-digimon", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, digimon: { [field]: value } }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) { setStatus(result.error ?? "Could not update the tracker."); return; }
-    await load();
+    if (!response.ok) { setRows(previous); setStatus(result.error ?? "Could not update the tracker."); }
   }
 
   async function saveInventory() {
@@ -818,6 +832,7 @@ export function TamerCreation(props: TamerCreationProps) {
             <div className="tamer-actions">
               <div className="experience-trackers" aria-label="Experience trackers">
                 <label className="experience-tracker"><span>Tamer EXP</span><EditableNumber compact value={Number(row.experience ?? 0)} label={`${String(row.name)} experience`} onSave={(value) => updateTamerTracker(id, "experience", value)} /></label>
+                <label className="experience-tracker money-tracker"><span>Money</span><EditableNumber compact value={Number(row.money ?? 0)} label={`${String(row.name)} money`} onSave={(value) => updateTamerTracker(id, "money", value)} /></label>
                 {partners.map((partner, index) => {
                   const experienceDigimon = partnerDigimon(partner);
                   return <label className="experience-tracker partner-experience" key={`experience-${String(partner.id)}`}>
