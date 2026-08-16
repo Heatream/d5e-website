@@ -225,6 +225,29 @@ function EditableNumber({ value, maximum, label, onSave, compact = false }: {
   </button>;
 }
 
+function DigimonExperienceTracker({ name, value, level, levels, onSave }: {
+  name: string; value: number; level: number; levels: LevelChart[]; onSave: (value: number) => Promise<void>;
+}) {
+  const current = levels.find((row) => row.level === level);
+  const next = levels.find((row) => row.level === level + 1);
+  const floor = current?.neededExperience ?? 0;
+  const target = next?.neededExperience;
+  const range = target == null ? 0 : Math.max(1, target - floor);
+  const progress = target == null ? 100 : Math.max(0, Math.min(100, ((value - floor) / range) * 100));
+  const ready = target != null && value >= target;
+  const progressLabel = target == null
+    ? `${name} is at maximum D-Level`
+    : `${Math.round(progress)}% toward level ${level + 1}: ${value} of ${target} EXP`;
+
+  return <div className={`experience-tracker partner-experience${ready ? " level-ready" : ""}`} aria-label={`${name} experience tracker`}>
+    <span>{name} EXP</span>
+    <span className="digimon-exp-value">{ready && <span className="level-ready-arrow" aria-label="Ready to level up">↑</span>}<EditableNumber compact value={value} label={`${name} experience`} onSave={onSave} /></span>
+    <span className="digimon-exp-progress" role="progressbar" aria-label={progressLabel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} title={progressLabel}>
+      <span style={{ width: `${progress}%` }} />
+    </span>
+  </div>;
+}
+
 function asDigimon(
   row: PartnerRow["player_digimon"],
   props: Pick<TamerCreationProps, "stages" | "attributes" | "fields" | "skills" | "types" | "items" | "levels">,
@@ -835,10 +858,10 @@ export function TamerCreation(props: TamerCreationProps) {
                 <label className="experience-tracker money-tracker"><span>Money</span><EditableNumber compact value={Number(row.money ?? 0)} label={`${String(row.name)} money`} onSave={(value) => updateTamerTracker(id, "money", value)} /></label>
                 {partners.map((partner, index) => {
                   const experienceDigimon = partnerDigimon(partner);
-                  return <label className="experience-tracker partner-experience" key={`experience-${String(partner.id)}`}>
-                    <span>{experienceDigimon?.name ?? `Partner ${index + 1}`} EXP</span>
-                    <EditableNumber compact value={Number(partner.player_digimon?.experience ?? 0)} label={`${experienceDigimon?.name ?? `Partner ${index + 1}`} experience`} onSave={(value) => updateDigimonTracker(String(partner.player_digimon_id), "experience", value)} />
-                  </label>;
+                  const experienceName = experienceDigimon?.name ?? `Partner ${index + 1}`;
+                  return <DigimonExperienceTracker key={`experience-${String(partner.id)}`} name={experienceName}
+                    value={Number(partner.player_digimon?.experience ?? 0)} level={Number(partner.player_digimon?.level ?? 1)} levels={props.levels}
+                    onSave={(value) => updateDigimonTracker(String(partner.player_digimon_id), "experience", value)} />;
                 })}
               </div>
               {isDigixrosser && tamerLevel >= 2 && firstPartner && <button className="army-button" onClick={() => setArmyManager({

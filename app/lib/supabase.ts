@@ -91,6 +91,7 @@ export type Field = {
 export type Attribute = { id: string; name: string; statBuffs: string[]; hpDice: Record<string, string>; image: string };
 export type LevelChart = {
   level: number;
+  neededExperience: number;
   proficiency: string;
   digislot: number;
   attachmentSkill: number;
@@ -162,6 +163,7 @@ type LevelRow = {
   level: number | string | null; proficiency: number | string | null; digislot: number | string | null;
   attachment_skill: number | string | null; saving_throws: number | string | null;
   attachment_skill_upgrade: number | string | null; asi_increase: number | string | null;
+  needed_exp: number | string | null;
 };
 type DigimonStageRow = {
   id: number; name: string | null; slug: string | null; level_slider_min: number | null;
@@ -376,7 +378,8 @@ export async function getMonsterManualData() {
     image: text(row.image, ""),
   }));
   const levels: LevelChart[] = levelRows.map((row) => ({
-    level: number(row.level, 1), proficiency: text(row.proficiency, "+2"), digislot: number(row.digislot, 1),
+    level: number(row.level, 1), neededExperience: number(row.needed_exp),
+    proficiency: text(row.proficiency, "+2"), digislot: number(row.digislot, 1),
     attachmentSkill: number(row.attachment_skill), savingThrows: number(row.saving_throws, 1),
     attachmentSkillUpgrade: number(row.attachment_skill_upgrade), asiIncrease: number(row.asi_increase),
   }));

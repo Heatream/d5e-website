@@ -1109,7 +1109,13 @@ button { cursor: pointer; }
 .experience-trackers { display: flex; align-items: center; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; margin-right: 0; }
 .experience-tracker { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.15rem; padding: .32rem .55rem; border: 1px solid #cbd5dc; border-radius: .65rem; background: #fff; color: #183040; font-size: .75rem; font-weight: 900; letter-spacing: .04em; }
 .experience-tracker > span { white-space: nowrap; }
-.experience-tracker.partner-experience { border-color: #b6dce7; background: #f4fbfd; }
+.experience-tracker.partner-experience { position: relative; overflow: hidden; padding-bottom: .52rem; border-color: #b6dce7; background: #f4fbfd; }
+.digimon-exp-value { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: .18rem; }
+.level-ready-arrow { color: #b67b05; font-size: 1rem; line-height: .7; filter: drop-shadow(0 1px 1px rgba(83,53,0,.2)); animation: level-ready-bob 1.1s ease-in-out infinite; }
+.digimon-exp-progress { position: absolute; z-index: 1; left: .42rem; right: .42rem; bottom: .22rem; height: 3px; overflow: hidden; border-radius: 99px; background: rgba(170,126,31,.18); }
+.digimon-exp-progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#c99321,#f2c85d); box-shadow: 0 0 5px rgba(211,159,40,.32); transition: width .25s ease; }
+.experience-tracker.partner-experience.level-ready { border-color: #d6b34f; background: #fffaf0; box-shadow: 0 0 0 2px rgba(214,179,79,.11); }
+@keyframes level-ready-bob { 0%,100% { transform: translateY(1px); } 50% { transform: translateY(-1px); } }
 .experience-tracker.money-tracker { min-width: 9.25rem; justify-content: space-between; border-color: #d8bd73; background: #fffaf0; }
 .experience-tracker.money-tracker .tracker-value,.experience-tracker.money-tracker .tracker-input { min-width: 4.6rem; }
 .tracker-value.compact { width: auto; min-width: 3rem; font-family: inherit; font-size: .9rem; }
