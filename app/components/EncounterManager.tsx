@@ -1428,12 +1428,12 @@ export function EncounterManager(props: Props) {
               ×
             </button>
           </div>
-          {picker !== "player" && <input
+          <input
             type="search"
             placeholder="Search…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-          />}
+          />
           <div className="encounter-picker-grid">
             {picker === "official_digimon" &&
               props.digimon
