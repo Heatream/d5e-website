@@ -228,15 +228,15 @@ function EditableNumber({ value, maximum, label, onSave, compact = false }: {
 function DigimonExperienceTracker({ name, value, level, levels, onSave }: {
   name: string; value: number; level: number; levels: LevelChart[]; onSave: (value: number) => Promise<void>;
 }) {
-  const current = levels.find((row) => row.level === level);
   const next = levels.find((row) => row.level === level + 1);
-  const floor = current?.neededExperience ?? 0;
   const target = next?.neededExperience;
-  const range = target == null ? 0 : Math.max(1, target - floor);
-  const progress = target == null ? 100 : Math.max(0, Math.min(100, ((value - floor) / range) * 100));
-  const ready = target != null && value >= target;
-  const progressLabel = target == null
+  const hasTarget = target != null && target > 0;
+  const progress = hasTarget ? Math.max(0, Math.min(100, (value / target) * 100)) : 0;
+  const ready = hasTarget && value >= target;
+  const progressLabel = level >= 20
     ? `${name} is at maximum D-Level`
+    : !hasTarget
+      ? `${name}'s next D-Level EXP requirement is unavailable`
     : `${Math.round(progress)}% toward level ${level + 1}: ${value} of ${target} EXP`;
 
   return <div className={`experience-tracker partner-experience${ready ? " level-ready" : ""}`} aria-label={`${name} experience tracker`}>
@@ -885,6 +885,11 @@ export function TamerCreation(props: TamerCreationProps) {
               })}>Bond</button>}
               <button className="primary-button" onClick={() => setPartnerPicker(partnerPicker === id ? null : id)}>Add Digimon</button><button onClick={() => edit(row)}>Edit</button><button className="danger-button" onClick={() => void removeTamer(id, String(row.name))}>Delete</button>
             </div>
+            {row.encounter_share_code ? <div className="character-share-code">
+              <span><small>Encounter code</small><code>{String(row.encounter_share_code)}</code></span>
+              <button type="button" onClick={() => void navigator.clipboard.writeText(String(row.encounter_share_code))}>Copy</button>
+            </div> : null}
+            <div className="sheet-composite-surface">
             <article className={`tamer-sheet${subclass?.border || isDnaPulser ? " has-template" : ""}`}>
               <div className="tamer-portrait">{row.image_path ? <img src={String(row.image_path)} alt="" /> : <span>Portrait</span>}</div>
               {(subclass?.border || isDnaPulser) && <img className="tamer-template" src={subclass?.border || "/assets/borders/subclass_dna_pulser.webp"} alt="" aria-hidden="true" />}
@@ -1005,6 +1010,7 @@ export function TamerCreation(props: TamerCreationProps) {
                 currentHp={partner.player_digimon?.current_hp == null ? null : Number(partner.player_digimon.current_hp)}
                 onCurrentHpChange={(value) => updateDigimonTracker(String(partner.player_digimon_id), "current_hp", value)} /></div>;
             })}
+            </div>
               {selectedFeature && tamerLevel >= selectedFeature.levelRequired && !(isDualWielder && selectedFeature.slug === "double-landing" && dualSpecial) && <section className="subclass-feature-details" aria-live="polite">
               <div><span className="eyebrow">{subclass?.name} feature · Level {selectedFeature.levelRequired}</span><h3>{selectedFeature.name}</h3></div>
               <p>{selectedFeature.description}</p>

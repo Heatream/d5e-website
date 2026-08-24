@@ -342,7 +342,7 @@ export async function getMonsterManualData() {
     request<DigimonRow[]>("Digimon", "select=*&order=id.asc"),
     request<FieldRow[]>("Field", "select=*&order=name.asc"),
     request<AttributeRow[]>("Attributes", "select=*&order=name.asc"),
-    request<LevelRow[]>("D Level Chart", "select=*&order=level.asc"),
+    request<LevelRow[]>("D Level Chart", "select=level,proficiency,digislot,attachment_skill,saving_throws,attachment_skill_upgrade,asi_increase,needed_exp&order=level.asc"),
     getSkills(), getTypeElements(), getPersonalitySkills(),
   ]);
 

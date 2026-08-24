@@ -3,10 +3,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MonsterManual } from "./MonsterManual";
 import {
+  adjacentTurn,
   clampTracker,
+  normalizeResource,
   sortEncounterParticipants,
   type EncounterParticipant,
   type EncounterParticipantKind,
+  type EncounterResource,
+  type LightweightPlayerPartner,
+  type LightweightPlayerState,
 } from "../lib/encounter-rules";
 import { calculateHp, modifier, stageRange } from "../lib/digimon-rules";
 import { armyXrossBonuses } from "../lib/digixrosser-rules";
@@ -86,6 +91,26 @@ type ArmyMember = {
   image_path?: string | null;
   is_xrossed?: boolean;
 };
+type SharedPreview = {
+  name: string;
+  partners: Array<{ slotNumber: number; name: string; forms: string[] }>;
+};
+type ManualPlayerDraft = {
+  name: string;
+  digimonName: string;
+  tamerHp: EncounterResource;
+  digimonHp: EncounterResource;
+  partnerPoints: EncounterResource;
+  digislot: EncounterResource;
+};
+const emptyManualPlayer = (): ManualPlayerDraft => ({
+  name: "",
+  digimonName: "",
+  tamerHp: { current: 0, maximum: 0 },
+  digimonHp: { current: 0, maximum: 0 },
+  partnerPoints: { current: 0, maximum: 0 },
+  digislot: { current: 0, maximum: 0 },
+});
 
 const skillAbilities: Array<[string, keyof Digimon]> = [
   ["Athletics", "strength"],
@@ -113,13 +138,127 @@ function split(value: unknown) {
     .map((part) => part.trim())
     .filter(Boolean);
 }
-function calculateTrackerInput(
-  input: string,
-  previous: number,
-  maximum: number,
-) {
-  const result = parseTrackerExpression(input, previous);
-  return result == null ? previous : clampTracker(result, maximum);
+function CompactResource({ label, value, onChange }: {
+  label: string;
+  value: EncounterResource;
+  onChange: (value: EncounterResource) => void;
+}) {
+  const commitCurrent = (input: HTMLInputElement) => {
+    const result = parseTrackerExpression(input.value, value.current);
+    const next = normalizeResource(result ?? value.current, value.maximum);
+    input.value = String(next.current);
+    onChange(next);
+  };
+  const commitMaximum = (input: HTMLInputElement) => {
+    const result = parseTrackerExpression(input.value, value.maximum);
+    const maximum = Math.max(0, Math.trunc(result ?? value.maximum));
+    const next = normalizeResource(value.current, maximum);
+    input.value = String(next.maximum);
+    onChange(next);
+  };
+  return <label className="player-resource-field">
+    <span>{label}</span>
+    <span className="player-resource-values">
+      <input key={`current-${value.current}`} aria-label={`${label} current`} inputMode="text" defaultValue={value.current} onBlur={(event) => commitCurrent(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+      <b>/</b>
+      <input key={`maximum-${value.maximum}`} aria-label={`${label} maximum`} inputMode="text" defaultValue={value.maximum} onBlur={(event) => commitMaximum(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+    </span>
+  </label>;
+}
+
+function EncounterInlineTracker({ value, maximum, label, onSave }: {
+  value: number;
+  maximum: number;
+  label: string;
+  onSave: (value: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const commit = () => {
+    const parsed = parseTrackerExpression(draft, value);
+    const next = parsed == null ? value : clampTracker(parsed, maximum);
+    setDraft(String(next));
+    setEditing(false);
+    if (next !== value) onSave(next);
+  };
+  if (editing) {
+    return <input
+      className="sheet-inline-number"
+      type="text"
+      inputMode="numeric"
+      aria-label={label}
+      value={draft}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          setDraft(String(value));
+          setEditing(false);
+        }
+      }}
+    />;
+  }
+  return <button
+    type="button"
+    className="tracker-value"
+    title={`Edit ${label}`}
+    onClick={() => {
+      setDraft(String(value));
+      setEditing(true);
+    }}
+  >
+    <span className="sheet-current-value">{value}</span>
+    <span className="sheet-value-divider">/</span>
+    <span className="sheet-maximum-value">{maximum}</span>
+  </button>;
+}
+
+function LightweightPlayerCard({ participant, onUpdate, cardRef }: {
+  participant: EncounterParticipant;
+  onUpdate: (state: LightweightPlayerState) => void;
+  cardRef?: (node: HTMLElement | null) => void;
+}) {
+  const raw = participant.state as Partial<LightweightPlayerState>;
+  const state: LightweightPlayerState = {
+    tamerHp: raw.tamerHp ?? { current: 0, maximum: 0 },
+    partnerPoints: raw.partnerPoints ?? { current: 0, maximum: 0 },
+    partners: Array.isArray(raw.partners) ? raw.partners : [],
+  };
+  const changePartner = (index: number, next: LightweightPlayerPartner) => {
+    const partners = [...state.partners];
+    partners[index] = next;
+    onUpdate({ ...state, partners });
+  };
+  return <article className="lightweight-player-card" ref={cardRef}>
+    <header><span className="eyebrow">Player</span><strong>{participant.display_name}</strong></header>
+    <div className="lightweight-tamer-resources">
+      <CompactResource label="Tamer HP" value={state.tamerHp} onChange={(tamerHp) => onUpdate({ ...state, tamerHp })} />
+      <CompactResource label="PP" value={state.partnerPoints} onChange={(partnerPoints) => onUpdate({ ...state, partnerPoints })} />
+    </div>
+    {state.partners.map((partner, index) => {
+      const activeIndex = Math.max(0, Math.min(partner.forms.length - 1, partner.activeFormIndex ?? 0));
+      const form = partner.forms[activeIndex];
+      if (!form) return null;
+      return <section className="lightweight-partner-row" key={`${partner.slotNumber}-${index}`}>
+        <div className="lightweight-partner-heading">
+          <button aria-label={`Previous evolution for ${form.name}`} disabled={activeIndex === 0} onClick={() => changePartner(index, { ...partner, activeFormIndex: activeIndex - 1 })}>‹</button>
+          <strong>{form.name}</strong>
+          <button aria-label={`Next evolution for ${form.name}`} disabled={activeIndex === partner.forms.length - 1} onClick={() => changePartner(index, { ...partner, activeFormIndex: activeIndex + 1 })}>›</button>
+        </div>
+        <div className="lightweight-partner-resources">
+          <CompactResource label="Digimon HP" value={{ current: form.currentHp, maximum: form.maximumHp }} onChange={(hp) => {
+            const forms = [...partner.forms];
+            forms[activeIndex] = { ...form, currentHp: hp.current, maximumHp: hp.maximum };
+            changePartner(index, { ...partner, forms });
+          }} />
+          <CompactResource label="DL" value={partner.digislot} onChange={(digislot) => changePartner(index, { ...partner, digislot })} />
+        </div>
+      </section>;
+    })}
+  </article>;
 }
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -469,24 +608,7 @@ function EncounterTamerSheet({
       </strong>
       <span className="tamer-level">{level}</span>
       <div className="tamer-hp">
-        <button
-          className="tracker-value"
-          onClick={() => {
-            const value = prompt(
-              "Current HP (simple + and - are accepted)",
-              String(currentHp),
-            );
-            if (value !== null)
-              onState({
-                ...state,
-                currentHp: calculateTrackerInput(value, currentHp, maxHp),
-              });
-          }}
-        >
-          <span className="sheet-current-value">{currentHp}</span>
-          <span className="sheet-value-divider">/</span>
-          <span className="sheet-maximum-value">{maxHp}</span>
-        </button>
+        <EncounterInlineTracker value={currentHp} maximum={maxHp} label="Tamer current HP" onSave={(value) => onState({ ...state, currentHp: value })} />
       </div>
       <div className="tamer-ac">
         <strong>{String(tamer.armor_class ?? 8)}</strong>
@@ -495,18 +617,7 @@ function EncounterTamerSheet({
         <strong>+{levelRow?.proficiencyBonus ?? 2}</strong>
       </div>
       <div className="tamer-pp">
-        <button
-          className="tracker-value"
-          onClick={() => {
-            const value = prompt("Current Partner Points", String(currentPp));
-            if (value !== null)
-              onState({ ...state, currentPp: clampTracker(value, maxPp) });
-          }}
-        >
-          <span className="sheet-current-value">{currentPp}</span>
-          <span className="sheet-value-divider">/</span>
-          <span className="sheet-maximum-value">{maxPp}</span>
-        </button>
+        <EncounterInlineTracker value={currentPp} maximum={maxPp} label="Current Partner Points" onSave={(value) => onState({ ...state, currentPp: value })} />
       </div>
       <div className="tamer-mv">
         <strong>{String(tamer.movement ?? 30)}ft</strong>
@@ -754,6 +865,10 @@ export function EncounterManager(props: Props) {
     [tamers, setTamers] = useState<Tamer[]>([]),
     [levels, setLevels] = useState<Record<string, number>>({}),
     [detail, setDetail] = useState<string | null>(null);
+  const [manualPlayer, setManualPlayer] = useState<ManualPlayerDraft>(emptyManualPlayer);
+  const [shareCode, setShareCode] = useState("");
+  const [sharePreview, setSharePreview] = useState<SharedPreview | null>(null);
+  const [selectedShareSlots, setSelectedShareSlots] = useState<number[]>([]);
   const sheetRefs = useRef<Record<string, HTMLElement | null>>({});
   const combatLayoutRef = useRef<HTMLDivElement | null>(null);
   const [sheetOffsets, setSheetOffsets] = useState<Record<string, number>>({});
@@ -828,6 +943,12 @@ export function EncounterManager(props: Props) {
   async function openPicker(kind: EncounterParticipantKind) {
     setPicker(kind);
     setQuery("");
+    if (kind === "player") {
+      setManualPlayer(emptyManualPlayer());
+      setShareCode("");
+      setSharePreview(null);
+      setSelectedShareSlots([]);
+    }
     if (kind === "saved_digimon" && !owned.length)
       setOwned(await request<Saved[]>("/api/player-digimon"));
     if (kind === "saved_tamer" && !tamers.length)
@@ -946,7 +1067,20 @@ export function EncounterManager(props: Props) {
       };
       sourceId = tamer.id;
     }
-    if (kind === "player") snapshot = { player: true };
+    if (kind === "player") {
+      const draft = manualPlayer;
+      snapshot = { player: true, imported: false };
+      state = {
+        tamerHp: normalizeResource(draft.tamerHp.current, draft.tamerHp.maximum),
+        partnerPoints: normalizeResource(draft.partnerPoints.current, draft.partnerPoints.maximum),
+        partners: draft.digimonHp.maximum > 0 || draft.digislot.maximum > 0 ? [{
+          slotNumber: 1,
+          activeFormIndex: 0,
+          forms: [{ name: draft.digimonName.trim() || "Digimon", currentHp: clampTracker(draft.digimonHp.current, draft.digimonHp.maximum), maximumHp: Math.max(0, draft.digimonHp.maximum) }],
+          digislot: normalizeResource(draft.digislot.current, draft.digislot.maximum),
+        }] : [],
+      } satisfies LightweightPlayerState;
+    }
     try {
       await request("/api/encounters/participants", {
         method: "POST",
@@ -968,6 +1102,31 @@ export function EncounterManager(props: Props) {
       );
     }
   }
+  async function resolveShareCode() {
+    try {
+      const preview = await request<SharedPreview>(`/api/player-tamers/share?code=${encodeURIComponent(shareCode.trim())}`);
+      setSharePreview(preview);
+      setSelectedShareSlots(preview.partners.slice(0, 1).map((partner) => partner.slotNumber));
+      setStatus("");
+    } catch (error) {
+      setSharePreview(null);
+      setStatus(error instanceof Error ? error.message : "Could not resolve character code.");
+    }
+  }
+  async function importSharedCharacter() {
+    if (!open || !sharePreview) return;
+    try {
+      await request("/api/encounters/participants/import", {
+        method: "POST",
+        body: JSON.stringify({ encounter_id: open.id, code: shareCode.trim(), selected_slots: selectedShareSlots }),
+      });
+      setPicker(null);
+      setStatus("");
+      await refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not import character.");
+    }
+  }
   async function update(
     participant: EncounterParticipant,
     patch: Record<string, unknown>,
@@ -986,6 +1145,56 @@ export function EncounterManager(props: Props) {
     } catch (error) {
       setOpen(previous);
       throw error;
+    }
+  }
+  async function advanceTurn() {
+    if (!open || !participants.length) return;
+    const previous = open;
+    const next = adjacentTurn(
+      participants,
+      open.active_participant_id,
+      open.round_number,
+      1,
+    );
+    const wrappedToTop = next.round > open.round_number;
+    setOpen({ ...open, active_participant_id: next.participantId, round_number: next.round });
+    if (next.participantId) {
+      requestAnimationFrame(() =>
+        sheetRefs.current[next.participantId!]?.scrollIntoView({
+          behavior: "smooth",
+          block: wrappedToTop ? "start" : "center",
+        }),
+      );
+    }
+    try {
+      await request("/api/encounters", {
+        method: "PATCH",
+        body: JSON.stringify({
+          id: open.id,
+          active_participant_id: next.participantId,
+          round_number: next.round,
+        }),
+      });
+    } catch (error) {
+      setOpen(previous);
+      setStatus(error instanceof Error ? error.message : "Could not advance the turn.");
+    }
+  }
+  async function selectTurn(participantId: string, block: ScrollLogicalPosition = "center") {
+    if (!open || open.active_participant_id === participantId) return;
+    const previous = open;
+    setOpen({ ...open, active_participant_id: participantId });
+    requestAnimationFrame(() =>
+      sheetRefs.current[participantId]?.scrollIntoView({ behavior: "smooth", block }),
+    );
+    try {
+      await request("/api/encounters", {
+        method: "PATCH",
+        body: JSON.stringify({ id: open.id, active_participant_id: participantId }),
+      });
+    } catch (error) {
+      setOpen(previous);
+      setStatus(error instanceof Error ? error.message : "Could not select the turn.");
     }
   }
 
@@ -1109,13 +1318,45 @@ export function EncounterManager(props: Props) {
             + My Characters
           </button>
           <button
-            onClick={() => {
-              const value = prompt("Player name");
-              if (value?.trim()) void add("player", null, value.trim());
-            }}
+            onClick={() => void openPicker("player")}
           >
             + Player
           </button>
+          {picker === "player" && <div className="player-picker-popover" role="dialog" aria-label="Add player">
+            <div className="player-popover-heading">
+              <strong>Add player</strong>
+              <button className="icon-button" aria-label="Close add player" onClick={() => setPicker(null)}>×</button>
+            </div>
+            <div className="player-picker-layout">
+              <section className="player-picker-card">
+                <span className="eyebrow">Manual player</span>
+                <div className="player-name-fields">
+                  <label>Tamer name<input value={manualPlayer.name} maxLength={80} onChange={(event) => setManualPlayer({ ...manualPlayer, name: event.target.value })} /></label>
+                  <label>Digimon name <small>Optional</small><input value={manualPlayer.digimonName} maxLength={80} onChange={(event) => setManualPlayer({ ...manualPlayer, digimonName: event.target.value })} /></label>
+                </div>
+                <div className="player-picker-resources">
+                  <CompactResource label="Tamer HP" value={manualPlayer.tamerHp} onChange={(tamerHp) => setManualPlayer({ ...manualPlayer, tamerHp })} />
+                  <CompactResource label="Partner Points" value={manualPlayer.partnerPoints} onChange={(partnerPoints) => setManualPlayer({ ...manualPlayer, partnerPoints })} />
+                  <CompactResource label="Digimon HP" value={manualPlayer.digimonHp} onChange={(digimonHp) => setManualPlayer({ ...manualPlayer, digimonHp })} />
+                  <CompactResource label="Digislot" value={manualPlayer.digislot} onChange={(digislot) => setManualPlayer({ ...manualPlayer, digislot })} />
+                </div>
+                <button className="primary-button" disabled={!manualPlayer.name.trim()} onClick={() => void add("player", null, manualPlayer.name.trim())}>Add Manual Player</button>
+              </section>
+              <section className="player-picker-card player-code-card">
+                <span className="eyebrow">Character code</span>
+                <label>Code<div className="share-code-entry"><input autoComplete="off" value={shareCode} onChange={(event) => { setShareCode(event.target.value); setSharePreview(null); }} /><button disabled={!shareCode.trim()} onClick={() => void resolveShareCode()}>Find</button></div></label>
+                {sharePreview && <div className="share-preview">
+                  <strong>{sharePreview.name}</strong>
+                  <p>Choose up to two partners.</p>
+                  <div className="share-partner-options">{sharePreview.partners.map((partner) => {
+                    const checked = selectedShareSlots.includes(partner.slotNumber);
+                    return <label key={partner.slotNumber}><input type="checkbox" checked={checked} disabled={!checked && selectedShareSlots.length >= 2} onChange={() => setSelectedShareSlots(checked ? selectedShareSlots.filter((slot) => slot !== partner.slotNumber) : [...selectedShareSlots, partner.slotNumber])} /><span><strong>{partner.name}</strong><small>{partner.forms.join(" → ")}</small></span></label>;
+                  })}</div>
+                  <button className="primary-button" onClick={() => void importSharedCharacter()}>Import Player</button>
+                </div>}
+              </section>
+            </div>
+          </div>}
         </div>
         <div className="initiative-list">
           {participants.map((participant) => (
@@ -1125,19 +1366,7 @@ export function EncounterManager(props: Props) {
             >
               <button
                 className="initiative-select"
-                onClick={async () => {
-                  await request("/api/encounters", {
-                    method: "PATCH",
-                    body: JSON.stringify({
-                      id: open.id,
-                      active_participant_id: participant.id,
-                    }),
-                  });
-                  await refresh();
-                  sheetRefs.current[participant.id]?.scrollIntoView({
-                    behavior: "smooth",
-                  });
-                }}
+                onClick={() => void selectTurn(participant.id)}
               >
                 <strong>{participant.display_name}</strong>
                 <small>
@@ -1191,20 +1420,20 @@ export function EncounterManager(props: Props) {
           ))}
         </div>
       </section>
-      {picker && (
-        <section className="encounter-picker">
+      {picker && picker !== "player" && (
+        <section className={`encounter-picker picker-popover picker-${picker}`}>
           <div className="section-heading-row">
             <h3>Add {picker.replaceAll("_", " ")}</h3>
             <button className="icon-button" onClick={() => setPicker(null)}>
               ×
             </button>
           </div>
-          <input
+          {picker !== "player" && <input
             type="search"
             placeholder="Search…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-          />
+          />}
           <div className="encounter-picker-grid">
             {picker === "official_digimon" &&
               props.digimon
@@ -1673,87 +1902,74 @@ export function EncounterManager(props: Props) {
                 <button
                   className="turn-rail-name"
                   title={`Select ${participant.display_name}`}
-                  onClick={async () => {
-                    await request("/api/encounters", {
-                      method: "PATCH",
-                      body: JSON.stringify({
-                        id: open.id,
-                        active_participant_id: participant.id,
-                      }),
-                    });
-                    await refresh();
-                    sheetRefs.current[participant.id]?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "start",
-                    });
-                  }}
+                  onClick={() => void selectTurn(participant.id, "start")}
                 >
                   {participant.display_name}
                 </button>
-                <input
-                  className="turn-initiative-circle"
-                  type="number"
-                  readOnly={editingInitiative !== participant.id}
-                  aria-label={`${participant.display_name} initiative`}
-                  title={
-                    editingInitiative === participant.id
-                      ? "Edit initiative"
-                      : "Click to select turn; double-click to edit initiative"
-                  }
-                  value={participant.initiative ?? ""}
-                  placeholder="—"
-                  onClick={async () => {
-                    if (editingInitiative === participant.id) return;
-                    await request("/api/encounters", {
-                      method: "PATCH",
-                      body: JSON.stringify({
-                        id: open.id,
-                        active_participant_id: participant.id,
-                      }),
-                    });
-                    await refresh();
-                  }}
-                  onDoubleClick={(event) => {
-                    setEditingInitiative(participant.id);
-                    requestAnimationFrame(() => event.currentTarget.focus());
-                  }}
-                  onChange={(event) =>
-                    setOpen({
-                      ...open,
-                      encounter_participants: (
-                        open.encounter_participants ?? []
-                      ).map((row) =>
-                        row.id === participant.id
-                          ? {
-                              ...row,
-                              initiative:
-                                event.target.value === ""
-                                  ? null
-                                  : Number(event.target.value),
-                            }
-                          : row,
-                      ),
-                    })
-                  }
-                  onBlur={(event) => {
-                    if (editingInitiative !== participant.id) return;
-                    setEditingInitiative(null);
-                    void update(participant, {
-                      initiative:
-                        event.target.value === ""
-                          ? null
-                          : Number(event.target.value),
-                    });
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    if (editingInitiative === participant.id) event.currentTarget.blur();
-                    else {
-                      setEditingInitiative(participant.id);
-                      requestAnimationFrame(() => event.currentTarget.focus());
+                <div className="turn-control-stack">
+                  <input
+                    className="turn-initiative-circle"
+                    type="number"
+                    readOnly={editingInitiative !== participant.id}
+                    aria-label={`${participant.display_name} initiative`}
+                    title={
+                      editingInitiative === participant.id
+                        ? "Edit initiative"
+                        : "Click to select turn; double-click to edit initiative"
                     }
-                  }}
-                />
+                    value={participant.initiative ?? ""}
+                    placeholder="—"
+                    onClick={() => {
+                      if (editingInitiative === participant.id) return;
+                      void selectTurn(participant.id);
+                    }}
+                    onDoubleClick={(event) => {
+                      const input = event.currentTarget;
+                      setEditingInitiative(participant.id);
+                      requestAnimationFrame(() => input.focus());
+                    }}
+                    onChange={(event) =>
+                      setOpen({
+                        ...open,
+                        encounter_participants: (
+                          open.encounter_participants ?? []
+                        ).map((row) =>
+                          row.id === participant.id
+                            ? {
+                                ...row,
+                                initiative:
+                                  event.target.value === ""
+                                    ? null
+                                    : Number(event.target.value),
+                              }
+                            : row,
+                        ),
+                      })
+                    }
+                    onBlur={(event) => {
+                      if (editingInitiative !== participant.id) return;
+                      setEditingInitiative(null);
+                      void update(participant, {
+                        initiative:
+                          event.target.value === ""
+                            ? null
+                            : Number(event.target.value),
+                      });
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      if (editingInitiative === participant.id) event.currentTarget.blur();
+                      else {
+                        const input = event.currentTarget;
+                        setEditingInitiative(participant.id);
+                        requestAnimationFrame(() => input.focus());
+                      }
+                    }}
+                  />
+                  {participant.id === open.active_participant_id && (
+                    <button className="turn-next-arrow" aria-label="Pass turn to next participant" title="Next turn" onClick={() => void advanceTurn()}>↓</button>
+                  )}
+                </div>
                 <button
                   className="turn-rail-remove"
                   aria-label={`Remove ${participant.display_name}`}
@@ -1770,6 +1986,21 @@ export function EncounterManager(props: Props) {
               </div>
             );
           })}
+        </aside>
+        <aside className="encounter-player-sidebar" aria-label="Lightweight players">
+          <div className="player-sidebar-heading">
+            <span className="eyebrow">Players</span>
+            <strong>{participants.filter((participant) => participant.participant_kind === "player").length}</strong>
+          </div>
+          {participants.filter((participant) => participant.participant_kind === "player").map((participant) => (
+            <LightweightPlayerCard
+              key={participant.id}
+              participant={participant}
+              onUpdate={(state) => void update(participant, { state })}
+              cardRef={(node) => { sheetRefs.current[participant.id] = node; }}
+            />
+          ))}
+          {!participants.some((participant) => participant.participant_kind === "player") && <p className="player-sidebar-empty">Add a manual player or import one with a character code.</p>}
         </aside>
       </div>
     </div>

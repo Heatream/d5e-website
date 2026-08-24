@@ -12,6 +12,24 @@ export type EncounterParticipant = {
   state: Record<string, unknown>;
 };
 
+export type EncounterResource = { current: number; maximum: number };
+export type LightweightPlayerForm = {
+  name: string;
+  currentHp: number;
+  maximumHp: number;
+};
+export type LightweightPlayerPartner = {
+  slotNumber: number;
+  activeFormIndex: number;
+  forms: LightweightPlayerForm[];
+  digislot: EncounterResource;
+};
+export type LightweightPlayerState = {
+  tamerHp: EncounterResource;
+  partnerPoints: EncounterResource;
+  partners: LightweightPlayerPartner[];
+};
+
 export function sortEncounterParticipants<T extends Pick<EncounterParticipant, "initiative" | "tie_order">>(rows: T[]) {
   return [...rows].sort((a, b) => {
     if (a.initiative == null && b.initiative != null) return 1;
@@ -42,4 +60,9 @@ export function adjacentTurn(
 export function clampTracker(value: unknown, maximum: unknown) {
   const max = Math.max(0, Math.trunc(Number(maximum) || 0));
   return Math.max(0, Math.min(max, Math.trunc(Number(value) || 0)));
+}
+
+export function normalizeResource(current: unknown, maximum: unknown): EncounterResource {
+  const safeMaximum = Math.max(0, Math.trunc(Number(maximum) || 0));
+  return { current: clampTracker(current, safeMaximum), maximum: safeMaximum };
 }
